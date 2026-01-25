@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemetry - {{ node_id }} - MeshCore HQ</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 1200px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>MeshCore HQ</h1>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/messages" class="nav-link">Messages</a>
+            <a href="/compose" class="nav-link">Compose</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h2>Telemetry: {{ node_id }}</h2>
+            <a href="/node/{{ node_id }}" class="btn btn-secondary">View Node Details</a>
+        </div>
+
+        <!-- Time Range Selector -->
+        <div class="filter-bar">
+            <label>Time Range:</label>
+            <button class="btn btn-secondary btn-sm" id="btn-1h" onclick="loadCharts(1)">1 Hour</button>
+            <button class="btn btn-secondary btn-sm" id="btn-6h" onclick="loadCharts(6)">6 Hours</button>
+            <button class="btn btn-secondary btn-sm active" id="btn-24h" onclick="loadCharts(24)">24 Hours</button>
+            <button class="btn btn-secondary btn-sm" id="btn-168h" onclick="loadCharts(168)">7 Days</button>
+        </div>
+
+        <!-- Charts Grid (2x2) -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Battery Level (%)</h3>
+                <canvas id="batteryChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Temperature (°C)</h3>
+                <canvas id="temperatureChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Voltage (V)</h3>
+                <canvas id="voltageChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>All Metrics</h3>
+                <canvas id="allMetricsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const nodeId = "{{ node_id }}";
+        let batteryChart, temperatureChart, voltageChart, allMetricsChart;
+        let currentHours = 24;
+
+        // Chart configuration
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                    },
+                    tooltip: {
+                        enabled: true,
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'MMM d, HH:mm'
+                            }
+                        },
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        beginAtZero: false,
+                        title: {
+                            display: true,
+                            text: 'Value'
+                        }
+                    }
+                }
+            }
+        };
+
+        // Initialize charts
+        function initCharts() {
+            const batteryCtx = document.getElementById('batteryChart').getContext('2d');
+            const tempCtx = document.getElementById('temperatureChart').getContext('2d');
+            const voltageCtx = document.getElementById('voltageChart').getContext('2d');
+            const allCtx = document.getElementById('allMetricsChart').getContext('2d');
+
+            batteryChart = new Chart(batteryCtx, {
+                ...chartConfig,
+                data: { datasets: [] }
+            });
+
+            temperatureChart = new Chart(tempCtx, {
+                ...chartConfig,
+                data: { datasets: [] }
+            });
+
+            voltageChart = new Chart(voltageCtx, {
+                ...chartConfig,
+                data: { datasets: [] }
+            });
+
+            allMetricsChart = new Chart(allCtx, {
+                ...chartConfig,
+                data: { datasets: [] }
+            });
+        }
+
+        // Update button active states
+        function updateButtonStates(hours) {
+            document.querySelectorAll('.filter-bar .btn-sm').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            const btnMap = {
+                1: 'btn-1h',
+                6: 'btn-6h',
+                24: 'btn-24h',
+                168: 'btn-168h'
+            };
+            
+            const activeBtn = document.getElementById(btnMap[hours]);
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+            }
+        }
+
+        // Load chart data
+        async function loadCharts(hours) {
+            currentHours = hours;
+            updateButtonStates(hours);
+
+            try {
+                // Load all metrics
+                const response = await fetch(`/api/telemetry/${nodeId}/all?hours=${hours}`);
+                
+                if (!response.ok) {
+                    console.error('Failed to load telemetry data:', response.statusText);
+                    showNoDataMessage();
+                    return;
+                }
+                
+                const data = await response.json();
+
+                // Check if we have any data
+                if (!data || Object.keys(data).length === 0) {
+                    console.log('No telemetry data available');
+                    showNoDataMessage();
+                    return;
+                }
+
+                // Update individual charts
+                updateChart(batteryChart, data.battery_level, 'Battery Level (%)', '#d4af37');
+                updateChart(temperatureChart, data.temperature, 'Temperature (°C)', '#17a2b8');
+                updateChart(voltageChart, data.voltage, 'Voltage (V)', '#28a745');
+
+                // Update combined chart
+                updateAllMetricsChart(allMetricsChart, data);
+
+            } catch (error) {
+                console.error('Failed to load telemetry data:', error);
+                showNoDataMessage();
+            }
+        }
+
+        // Show no data message
+        function showNoDataMessage() {
+            [batteryChart, temperatureChart, voltageChart, allMetricsChart].forEach(chart => {
+                if (chart) {
+                    chart.data.datasets = [];
+                    chart.options.plugins.subtitle = {
+                        display: true,
+                        text: 'No data available for this time range',
+                        color: '#6c757d'
+                    };
+                    chart.update();
+                }
+            });
+        }
+
+        // Update a single chart
+        function updateChart(chart, dataPoints, label, color) {
+            if (!dataPoints || dataPoints.length === 0) {
+                chart.data.datasets = [];
+                chart.options.plugins.subtitle = {
+                    display: true,
+                    text: 'No data available',
+                    color: '#6c757d'
+                };
+                chart.update();
+                return;
+            }
+
+            const formattedData = dataPoints.map(dp => ({
+                x: new Date(dp.timestamp),
+                y: dp.value
+            }));
+
+            chart.data.datasets = [{
+                label: label,
+                data: formattedData,
+                borderColor: color,
+                backgroundColor: color + '33',
+                tension: 0.4,
+                fill: true,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }];
+
+            chart.options.plugins.subtitle = {
+                display: false
+            };
+
+            chart.update();
+        }
+
+        // Update combined metrics chart
+        function updateAllMetricsChart(chart, allData) {
+            const datasets = [];
+            const colors = ['#d4af37', '#17a2b8', '#28a745', '#dc3545', '#6f42c1'];
+            let colorIndex = 0;
+
+            for (const [metricName, dataPoints] of Object.entries(allData)) {
+                if (dataPoints && dataPoints.length > 0) {
+                    datasets.push({
+                        label: metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                        data: dataPoints.map(dp => ({
+                            x: new Date(dp.timestamp),
+                            y: dp.value
+                        })),
+                        borderColor: colors[colorIndex % colors.length],
+                        backgroundColor: colors[colorIndex % colors.length] + '33',
+                        tension: 0.4,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 4
+                    });
+                    colorIndex++;
+                }
+            }
+
+            if (datasets.length === 0) {
+                chart.data.datasets = [];
+                chart.options.plugins.subtitle = {
+                    display: true,
+                    text: 'No data available',
+                    color: '#6c757d'
+                };
+            } else {
+                chart.data.datasets = datasets;
+                chart.options.plugins.subtitle = {
+                    display: false
+                };
+            }
+
+            chart.update();
+        }
+
+        // Initialize and load data
+        initCharts();
+        loadCharts(currentHours);
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => loadCharts(currentHours), 30000);
+    </script>
+</body>
+</html>

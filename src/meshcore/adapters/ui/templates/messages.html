@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messages - MeshCore HQ</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>MeshCore HQ</h1>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/messages" class="nav-link active">Messages</a>
+            <a href="/compose" class="nav-link">Compose</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h2>Message History</h2>
+            <a href="/compose" class="btn btn-primary">New Message</a>
+        </div>
+
+        <!-- Search and Filter -->
+        <div class="filter-bar">
+            <form hx-get="/messages/list" 
+                  hx-target="#messages-list" 
+                  hx-trigger="submit, input delay:500ms from:#search">
+                <input type="text" 
+                       id="search" 
+                       name="search" 
+                       placeholder="Search messages..."
+                       class="search-input">
+                <button type="submit" class="btn btn-secondary">Search</button>
+            </form>
+        </div>
+
+        <!-- Messages List -->
+        <div class="messages-container">
+            <div id="messages-list"
+                 hx-get="/messages/list"
+                 hx-trigger="load, every 5s"
+                 hx-swap="innerHTML">
+                <p class="loading">Loading messages...</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

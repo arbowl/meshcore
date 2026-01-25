@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compose Message - MeshCore HQ</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>MeshCore HQ</h1>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/messages" class="nav-link">Messages</a>
+            <a href="/compose" class="nav-link active">Compose</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h2>Compose Message</h2>
+        </div>
+
+        <div class="compose-container">
+            <form hx-post="/api/send_message" 
+                  hx-target="#send-status"
+                  hx-swap="innerHTML">
+                
+                <div class="form-group">
+                    <label for="recipient">Recipient</label>
+                    <select name="recipient" id="recipient" class="form-control" required>
+                        <option value="broadcast">Broadcast to All</option>
+                        <optgroup label="Network Nodes">
+                            {% for node in nodes %}
+                            <option value="{{ node.node_id.value }}">{{ node.node_id.value }}</option>
+                            {% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="channel">Channel</label>
+                    <select name="channel" id="channel" class="form-control">
+                        <option value="0">Channel 0 (Default)</option>
+                        <option value="1">Channel 1</option>
+                        <option value="2">Channel 2</option>
+                        <option value="3">Channel 3</option>
+                        <option value="4">Channel 4</option>
+                        <option value="5">Channel 5</option>
+                        <option value="6">Channel 6</option>
+                        <option value="7">Channel 7</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="message">Message</label>
+                    <textarea name="message" 
+                              id="message" 
+                              class="form-control" 
+                              rows="6" 
+                              placeholder="Type your message here..."
+                              required
+                              maxlength="237"></textarea>
+                    <div class="form-hint">
+                        <span id="char-count">0</span> / 237 characters
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary btn-large">
+                        Send Message
+                    </button>
+                    <a href="/messages" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+
+            <div id="send-status" class="send-status"></div>
+        </div>
+
+        <div class="help-box">
+            <h3>Information</h3>
+            <ul>
+                <li>Broadcast messages go to all nodes on the network</li>
+                <li>Direct messages are sent to specific nodes</li>
+                <li>Maximum message length is 237 characters</li>
+                <li>Channel 0 is the default public channel</li>
+                <li>Encryption is managed through Meshtastic device settings</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Character counter
+        const messageBox = document.getElementById('message');
+        const charCount = document.getElementById('char-count');
+        
+        messageBox.addEventListener('input', () => {
+            charCount.textContent = messageBox.value.length;
+        });
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - MeshCore HQ</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>MeshCore HQ</h1>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/messages" class="nav-link">Messages</a>
+            <a href="/compose" class="nav-link">Compose</a>
+            <a href="/analytics" class="nav-link active">Analytics</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h2>Network Analytics</h2>
+        </div>
+
+        <!-- Stats Summary -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ nodes|length }}</div>
+                <div class="stat-label">Total Nodes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ total_messages }}</div>
+                <div class="stat-label">Total Messages</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ messages_24h }}</div>
+                <div class="stat-label">Messages (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ (messages_24h / 24)|round(1) }}</div>
+                <div class="stat-label">Msgs/Hour (avg)</div>
+            </div>
+        </div>
+
+        <!-- Top Senders -->
+        <div class="section">
+            <h3>Top Message Senders</h3>
+            {% if top_senders %}
+            <div class="leaderboard">
+                {% for node_id, count in top_senders %}
+                <div class="leaderboard-item">
+                    <span class="rank">{{ loop.index }}</span>
+                    <a href="/node/{{ node_id }}" class="node-link">{{ node_id }}</a>
+                    <span class="count">{{ count }} messages</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-hint">No message data available</p>
+            {% endif %}
+        </div>
+
+        <!-- Network Health -->
+        <div class="section">
+            <h3>Network Health</h3>
+            <div class="health-grid">
+                {% for node in nodes %}
+                <div class="health-card">
+                    <div class="health-header">
+                        <span class="status-indicator {{ node.last_seen|status_class }}"></span>
+                        <a href="/node/{{ node.node_id.value }}" class="node-link">
+                            {{ node.node_id.value }}
+                        </a>
+                    </div>
+                    <div class="health-stats">
+                        <div class="health-stat">
+                            <span class="label">Battery</span>
+                            <span class="value">{{ node.last_telemetry|format_battery }}</span>
+                        </div>
+                        <div class="health-stat">
+                            <span class="label">Events</span>
+                            <span class="value">{{ node.event_count }}</span>
+                        </div>
+                        <div class="health-stat">
+                            <span class="label">Last Seen</span>
+                            <span class="value">{{ node.last_seen|timeago }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Node Status Distribution</h3>
+                <canvas id="statusChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Message Activity</h3>
+                <canvas id="activityChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Prepare node data from server
+        const nodesData = [
+            {% for node in nodes %}
+            {
+                nodeId: "{{ node.node_id.value }}",
+                lastSeen: "{{ node.last_seen.isoformat() }}",
+                eventCount: {{ node.event_count }}
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+
+        // Status distribution chart
+        const statusCtx = document.getElementById('statusChart').getContext('2d');
+        const statusChart = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Active (<1min)', 'Recent (<5min)', 'Idle (<1h)', 'Offline (>1h)'],
+                datasets: [{
+                    data: calculateStatusDistribution(),
+                    backgroundColor: ['#10b981', '#2563eb', '#f59e0b', '#6b7280'],
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // Activity chart
+        const activityCtx = document.getElementById('activityChart').getContext('2d');
+        const activityChart = new Chart(activityCtx, {
+            type: 'bar',
+            data: {
+                labels: [
+                    {% for node_id, count in top_senders %}
+                    "{{ node_id }}"{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ],
+                datasets: [{
+                    label: 'Messages Sent',
+                    data: [
+                        {% for node_id, count in top_senders %}
+                        {{ count }}{% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    ],
+                    backgroundColor: '#2563eb',
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                }
+            }
+        });
+
+        function calculateStatusDistribution() {
+            const now = new Date();
+            let active = 0, recent = 0, idle = 0, offline = 0;
+
+            nodesData.forEach(node => {
+                const lastSeen = new Date(node.lastSeen);
+                const diff = (now - lastSeen) / 1000; // seconds
+
+                if (diff < 60) active++;
+                else if (diff < 300) recent++;
+                else if (diff < 3600) idle++;
+                else offline++;
+            });
+
+            return [active, recent, idle, offline];
+        }
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,46 @@
+{% if nodes %}
+<table class="nodes-table">
+    <thead>
+        <tr>
+            <th>Status</th>
+            <th>Node ID</th>
+            <th>Last Seen</th>
+            <th>Events</th>
+            <th>Battery</th>
+            <th>Temperature</th>
+            <th>Position</th>
+            <th>Last Message</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for node in nodes %}
+        <tr class="node-row">
+            <td>
+                <span class="status-indicator {{ node.last_seen|status_class }}"></span>
+            </td>
+            <td class="node-id">
+                <a href="/node/{{ node.node_id.value }}" class="node-link">
+                    {{ node.node_id.value }}
+                </a>
+            </td>
+            <td class="time-ago">{{ node.last_seen|timeago }}</td>
+            <td class="event-count">{{ node.event_count }}</td>
+            <td class="battery">{{ node.last_telemetry|format_battery }}</td>
+            <td class="temperature">{{ node.last_telemetry|format_temp }}</td>
+            <td class="position">{{ node.last_position|format_position }}</td>
+            <td class="message">{{ node.last_text|truncate_text(60) }}</td>
+            <td class="actions">
+                <a href="/telemetry/{{ node.node_id.value }}" class="btn-icon" title="View Telemetry">Chart</a>
+                <a href="/messages?node_id={{ node.node_id.value }}" class="btn-icon" title="View Messages">Msgs</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <p>No nodes detected yet</p>
+    <p class="empty-hint">Make sure the core service is running: <code>uv run meshtastic-hexagonal</code></p>
+</div>
+{% endif %}

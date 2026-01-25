@@ -1,0 +1,35 @@
+{% if messages %}
+<div class="messages-list">
+    {% for msg in messages %}
+    <div class="message-card">
+        <div class="message-header">
+            <span class="message-from">
+                <strong>From:</strong> 
+                <a href="/node/{{ msg.from_node }}" class="node-link">{{ msg.from_node }}</a>
+            </span>
+            <span class="message-time">{{ msg.timestamp|timeago }}</span>
+        </div>
+        <div class="message-body">
+            {{ msg.text }}
+        </div>
+        <div class="message-meta">
+            {% if msg.to_node %}
+            <span class="badge">To: {{ msg.to_node }}</span>
+            {% else %}
+            <span class="badge badge-broadcast">Broadcast</span>
+            {% endif %}
+            <span class="badge">Channel {{ msg.channel }}</span>
+            {% if msg.encrypted %}
+            <span class="badge badge-encrypted">🔒 Encrypted</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No messages yet</p>
+    <p class="empty-hint">Messages will appear here as they are received</p>
+</div>
+{% endif %}
+

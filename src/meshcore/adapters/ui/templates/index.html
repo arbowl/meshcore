@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshCore HQ - Network Control Center</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>MeshCore HQ</h1>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link active">Dashboard</a>
+            <a href="/messages" class="nav-link">Messages</a>
+            <a href="/compose" class="nav-link">Compose</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Stats Cards -->
+        <div id="stats" 
+             hx-get="/stats" 
+             hx-trigger="load, every 2s"
+             hx-swap="innerHTML">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Total Nodes</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Active Nodes</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Total Events</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="action-bar">
+            <a href="/compose" class="btn btn-primary">Send Message</a>
+            <a href="/messages" class="btn btn-secondary">View Messages</a>
+            <a href="/analytics" class="btn btn-secondary">Analytics</a>
+        </div>
+
+        <!-- Nodes Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Network Nodes</h2>
+                <div class="refresh-indicator">
+                    <span class="pulse"></span>
+                    Auto-refresh: 2s
+                </div>
+            </div>
+            
+            <div id="nodes-table" 
+                 hx-get="/nodes" 
+                 hx-trigger="load, every 2s"
+                 hx-swap="innerHTML">
+                <p class="loading">Loading nodes...</p>
+            </div>
+        </div>
+
+        <footer>
+            <p>MeshCore HQ | Built with Flask + HTMX + Chart.js</p>
+        </footer>
+    </div>
+</body>
+</html>

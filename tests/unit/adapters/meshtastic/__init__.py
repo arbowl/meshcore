@@ -1,2 +1,0 @@
-"""Meshtastic adapter tests"""
-

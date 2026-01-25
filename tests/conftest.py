@@ -2,27 +2,24 @@ import pytest
 import tempfile
 import os
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import Mock
-from meshcore.domain.events import (
-    MeshEvent,
-    NodeDiscovered,
-    MessageReceived,
-    TelemetryReceived,
-    PositionUpdate
-)
-from meshcore.domain.state import NodeState
+from meshcore.domain.models import MeshEvent, NodeState, EventId, NodeId
 
 
 @pytest.fixture
 def temp_db_path():
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as f:
-        db_path = f.name
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
     yield db_path
     try:
         os.unlink(db_path)
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         pass
+    for suffix in ['-wal', '-shm']:
+        try:
+            os.unlink(db_path + suffix)
+        except (FileNotFoundError, PermissionError):
+            pass
 
 
 @pytest.fixture
@@ -32,56 +29,57 @@ def sample_timestamp():
 
 @pytest.fixture
 def node_id():
-    return "!abcd1234"
+    return NodeId(value="!abcd1234")
 
 
 @pytest.fixture
-def node_discovered_event(node_id, sample_timestamp):
-    return NodeDiscovered(
-        timestamp=sample_timestamp,
+def mesh_event_telemetry(node_id, sample_timestamp):
+    return MeshEvent(
+        event_id=EventId(),
         node_id=node_id,
-        long_name="Test Node",
-        short_name="TN",
-        hardware_model="TBEAM",
-        role="ROUTER"
+        event_type="telemetry",
+        timestamp=sample_timestamp,
+        ingested_at=sample_timestamp,
+        payload={
+            "battery_level": 85,
+            "voltage": 4.2,
+            "channel_utilization": 15.5
+        },
+        provenance={"source": "test"}
     )
 
 
 @pytest.fixture
-def message_received_event(node_id, sample_timestamp):
-    return MessageReceived(
+def mesh_event_message(node_id, sample_timestamp):
+    return MeshEvent(
+        event_id=EventId(),
+        node_id=node_id,
+        event_type="text",
         timestamp=sample_timestamp,
-        from_id=node_id,
-        to_id="!ffff1111",
-        text="Hello World",
-        channel=0,
-        packet_id=12345,
-        hop_limit=3,
-        want_ack=False
+        ingested_at=sample_timestamp,
+        payload={
+            "text": "Hello World",
+            "from_id": "!abcd1234",
+            "to_id": "!ffff1111"
+        },
+        provenance={"source": "test"}
     )
 
 
 @pytest.fixture
-def telemetry_received_event(node_id, sample_timestamp):
-    return TelemetryReceived(
-        timestamp=sample_timestamp,
+def mesh_event_position(node_id, sample_timestamp):
+    return MeshEvent(
+        event_id=EventId(),
         node_id=node_id,
-        battery_level=85,
-        voltage=4.2,
-        channel_utilization=15.5,
-        air_util_tx=5.2
-    )
-
-
-@pytest.fixture
-def position_update_event(node_id, sample_timestamp):
-    return PositionUpdate(
+        event_type="position",
         timestamp=sample_timestamp,
-        node_id=node_id,
-        latitude=37.7749,
-        longitude=-122.4194,
-        altitude=100,
-        precision_bits=32
+        ingested_at=sample_timestamp,
+        payload={
+            "latitude": 37.7749,
+            "longitude": -122.4194,
+            "altitude": 100
+        },
+        provenance={"source": "test"}
     )
 
 
@@ -89,30 +87,28 @@ def position_update_event(node_id, sample_timestamp):
 def sample_node_state(node_id, sample_timestamp):
     return NodeState(
         node_id=node_id,
-        long_name="Test Node",
-        short_name="TN",
-        hardware_model="TBEAM",
-        role="ROUTER",
         first_seen=sample_timestamp,
-        last_seen=sample_timestamp
+        last_seen=sample_timestamp,
+        event_count=1
     )
 
 
 @pytest.fixture
 def mock_event_store():
+    from unittest.mock import AsyncMock
     mock = Mock()
-    mock.append.return_value = None
-    mock.get_all.return_value = []
-    mock.get_by_node.return_value = []
+    mock.append = AsyncMock(return_value=None)
+    mock.get_all = AsyncMock(return_value=[])
     return mock
 
 
 @pytest.fixture
 def mock_state_store():
+    from unittest.mock import AsyncMock
     mock = Mock()
-    mock.save.return_value = None
-    mock.get.return_value = None
-    mock.get_all.return_value = []
+    mock.upsert_node = AsyncMock(return_value=None)
+    mock.get_node = AsyncMock(return_value=None)
+    mock.get_all_nodes = AsyncMock(return_value=[])
     return mock
 
 
@@ -124,4 +120,3 @@ def mock_mqtt_client():
     mock.loop_start.return_value = None
     mock.loop_stop.return_value = None
     return mock
-

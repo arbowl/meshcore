@@ -1,103 +1,115 @@
 import pytest
 from datetime import datetime, timedelta
-from meshcore.adapters.storage.sqlite import SQLiteEventStore, SQLiteStateStore
+from meshcore.adapters.storage.sqlite import SqliteEventStore
+from meshcore.adapters.storage.state_sqlite import SqliteStateStore
+from meshcore.domain.models import NodeId
 from tests.fixtures.factories import EventFactory, StateFactory
 
 
-def test_event_store_initialization(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
-    assert store.db_path == temp_db_path
+@pytest.mark.asyncio
+async def test_event_store_initialization(temp_db_path):
+    store = SqliteEventStore(temp_db_path)
+    assert store is not None
+    store._conn.close()
 
 
-def test_event_store_append_and_get_all(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
-    event = EventFactory.node_discovered(node_id="!test")
-    store.append(event)
-    events = store.get_all()
+@pytest.mark.asyncio
+async def test_event_store_append_and_replay(temp_db_path):
+    store = SqliteEventStore(temp_db_path)
+    event = EventFactory.telemetry_event(node_id="!test")
+    await store.append(event)
+    events = []
+    async for e in store.replay(since=None, until=None):
+        events.append(e)
     assert len(events) == 1
-    assert events[0].node_id == "!test"
+    assert events[0].node_id.value == "!test"
+    store._conn.close()
 
 
-def test_event_store_get_by_node(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
-    store.append(EventFactory.node_discovered(node_id="!node1"))
-    store.append(EventFactory.telemetry_received(node_id="!node1"))
-    store.append(EventFactory.telemetry_received(node_id="!node2"))
-    events = store.get_by_node("!node1")
-    assert len(events) == 2
-    for event in events:
-        assert event.node_id == "!node1"
+@pytest.mark.asyncio
+async def test_event_store_multiple_events(temp_db_path):
+    store = SqliteEventStore(temp_db_path)
+    await store.append(EventFactory.telemetry_event(node_id="!node1"))
+    await store.append(EventFactory.text_event(node_id="!node1"))
+    await store.append(EventFactory.telemetry_event(node_id="!node2"))
+    events = []
+    async for e in store.replay(since=None, until=None):
+        events.append(e)
+    assert len(events) == 3
+    store._conn.close()
 
 
-def test_event_store_query_by_type(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
-    store.append(EventFactory.node_discovered(node_id="!node1"))
-    store.append(EventFactory.message_received(from_id="!node1"))
-    store.append(EventFactory.telemetry_received(node_id="!node1"))
-    messages = store.query_by_type("MESSAGE_RECEIVED")
-    assert len(messages) == 1
-    assert messages[0].event_type == "MESSAGE_RECEIVED"
-
-
-def test_event_store_get_telemetry_series(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
+@pytest.mark.asyncio
+async def test_event_store_time_filtering(temp_db_path):
+    store = SqliteEventStore(temp_db_path)
     now = datetime.now()
-    store.append(EventFactory.telemetry_received(
+    await store.append(EventFactory.telemetry_event(
         node_id="!test",
         timestamp=now - timedelta(hours=2)
     ))
-    store.append(EventFactory.telemetry_received(
+    await store.append(EventFactory.telemetry_event(
         node_id="!test",
         timestamp=now - timedelta(hours=1)
     ))
-    telemetry = store.get_telemetry_series("!test", hours=24)
-    assert len(telemetry) == 2
+    since = now - timedelta(hours=1, minutes=30)
+    events = []
+    async for e in store.replay(since=since, until=None):
+        events.append(e)
+    assert len(events) == 1
+    store._conn.close()
 
 
-def test_event_store_search_messages(temp_db_path):
-    store = SQLiteEventStore(temp_db_path)
-    store.append(EventFactory.message_received(text="Hello world"))
-    store.append(EventFactory.message_received(text="Goodbye"))
-    results = store.search_messages("Hello")
-    assert len(results) == 1
-    assert "Hello" in results[0].text
+@pytest.mark.asyncio
+async def test_state_store_initialization(temp_db_path):
+    store = SqliteStateStore(temp_db_path)
+    assert store is not None
+    store._conn.close()
 
 
-def test_state_store_initialization(temp_db_path):
-    store = SQLiteStateStore(temp_db_path)
-    assert store.db_path == temp_db_path
-
-
-def test_state_store_save_and_get(temp_db_path):
-    store = SQLiteStateStore(temp_db_path)
+@pytest.mark.asyncio
+async def test_state_store_upsert_and_get(temp_db_path):
+    store = SqliteStateStore(temp_db_path)
     state = StateFactory.node_state(node_id="!test")
-    store.save(state)
-    retrieved = store.get("!test")
+    await store.upsert_node(state)
+    retrieved = await store.get_node(NodeId(value="!test"))
     assert retrieved is not None
-    assert retrieved.node_id == "!test"
-    assert retrieved.long_name == state.long_name
+    assert retrieved.node_id.value == "!test"
+    store._conn.close()
 
 
-def test_state_store_get_all(temp_db_path):
-    store = SQLiteStateStore(temp_db_path)
-    store.save(StateFactory.node_state(node_id="!node1"))
-    store.save(StateFactory.node_state(node_id="!node2"))
-    states = store.get_all()
+@pytest.mark.asyncio
+async def test_state_store_list_nodes(temp_db_path):
+    store = SqliteStateStore(temp_db_path)
+    await store.upsert_node(StateFactory.node_state(node_id="!node1"))
+    await store.upsert_node(StateFactory.node_state(node_id="!node2"))
+    states = await store.list_nodes()
     assert len(states) == 2
+    store._conn.close()
 
 
-def test_state_store_update_existing(temp_db_path):
-    store = SQLiteStateStore(temp_db_path)
-    state = StateFactory.node_state(node_id="!test", battery_level=85)
-    store.save(state)
-    state.battery_level = 75
-    store.save(state)
-    retrieved = store.get("!test")
-    assert retrieved.battery_level == 75
+@pytest.mark.asyncio
+async def test_state_store_update_existing(temp_db_path):
+    store = SqliteStateStore(temp_db_path)
+    state = StateFactory.node_state(
+        node_id="!test",
+        last_telemetry={"battery_level": 85}
+    )
+    await store.upsert_node(state)
+    state = state.model_copy(update={
+        "last_telemetry": {"battery_level": 75}
+    })
+    await store.upsert_node(state)
+    retrieved = await store.get_node(NodeId(value="!test"))
+    assert retrieved.last_telemetry["battery_level"] == 75
+    store._conn.close()
 
 
-def test_state_store_get_nonexistent(temp_db_path):
-    store = SQLiteStateStore(temp_db_path)
-    retrieved = store.get("!nonexistent")
+@pytest.mark.asyncio
+async def test_state_store_delete_node(temp_db_path):
+    store = SqliteStateStore(temp_db_path)
+    state = StateFactory.node_state(node_id="!test")
+    await store.upsert_node(state)
+    await store.delete_node(NodeId(value="!test"))
+    retrieved = await store.get_node(NodeId(value="!test"))
     assert retrieved is None
-
+    store._conn.close()

@@ -1,112 +1,84 @@
 from datetime import datetime, timedelta
-from typing import Optional
-from meshcore.domain.events import (
-    NodeDiscovered,
-    MessageReceived,
-    TelemetryReceived,
-    PositionUpdate,
-    NodeInfo
-)
-from meshcore.domain.state import NodeState
+from typing import Optional, Any
+from meshcore.domain.models import MeshEvent, NodeState, EventId, NodeId
 
 
 class EventFactory:
     @staticmethod
-    def node_discovered(
+    def mesh_event(
         node_id: str = "!test1234",
-        long_name: str = "Test Node",
-        short_name: str = "TN",
-        hardware_model: str = "TBEAM",
-        role: str = "CLIENT",
+        event_type: str = "telemetry",
+        payload: Optional[dict[str, Any]] = None,
         timestamp: Optional[datetime] = None
-    ) -> NodeDiscovered:
-        return NodeDiscovered(
+    ) -> MeshEvent:
+        return MeshEvent(
+            event_id=EventId(),
+            node_id=NodeId(value=node_id),
+            event_type=event_type,
             timestamp=timestamp or datetime.now(),
-            node_id=node_id,
-            long_name=long_name,
-            short_name=short_name,
-            hardware_model=hardware_model,
-            role=role
+            ingested_at=timestamp or datetime.now(),
+            payload=payload or {},
+            provenance={"source": "test"}
         )
     @staticmethod
-    def message_received(
-        from_id: str = "!from1234",
-        to_id: str = "!to5678",
-        text: str = "Test message",
-        channel: int = 0,
-        packet_id: int = 12345,
-        timestamp: Optional[datetime] = None,
-        hop_limit: int = 3,
-        want_ack: bool = False
-    ) -> MessageReceived:
-        return MessageReceived(
-            timestamp=timestamp or datetime.now(),
-            from_id=from_id,
-            to_id=to_id,
-            text=text,
-            channel=channel,
-            packet_id=packet_id,
-            hop_limit=hop_limit,
-            want_ack=want_ack
-        )
-    @staticmethod
-    def telemetry_received(
+    def telemetry_event(
         node_id: str = "!node1234",
         battery_level: Optional[int] = 85,
         voltage: Optional[float] = 4.2,
         channel_utilization: Optional[float] = 15.5,
-        air_util_tx: Optional[float] = 5.2,
-        temperature: Optional[float] = None,
-        humidity: Optional[float] = None,
-        pressure: Optional[float] = None,
         timestamp: Optional[datetime] = None
-    ) -> TelemetryReceived:
-        return TelemetryReceived(
-            timestamp=timestamp or datetime.now(),
+    ) -> MeshEvent:
+        payload = {}
+        if battery_level is not None:
+            payload["battery_level"] = battery_level
+        if voltage is not None:
+            payload["voltage"] = voltage
+        if channel_utilization is not None:
+            payload["channel_utilization"] = channel_utilization
+        return EventFactory.mesh_event(
             node_id=node_id,
-            battery_level=battery_level,
-            voltage=voltage,
-            channel_utilization=channel_utilization,
-            air_util_tx=air_util_tx,
-            temperature=temperature,
-            humidity=humidity,
-            pressure=pressure
+            event_type="telemetry",
+            payload=payload,
+            timestamp=timestamp
         )
     @staticmethod
-    def position_update(
+    def text_event(
+        node_id: str = "!from1234",
+        text: str = "Test message",
+        from_id: Optional[str] = None,
+        to_id: Optional[str] = None,
+        timestamp: Optional[datetime] = None
+    ) -> MeshEvent:
+        payload = {"text": text}
+        if from_id:
+            payload["from_id"] = from_id
+        if to_id:
+            payload["to_id"] = to_id
+        return EventFactory.mesh_event(
+            node_id=node_id,
+            event_type="text",
+            payload=payload,
+            timestamp=timestamp
+        )
+    @staticmethod
+    def position_event(
         node_id: str = "!node1234",
         latitude: float = 37.7749,
         longitude: float = -122.4194,
         altitude: Optional[int] = 100,
-        precision_bits: int = 32,
         timestamp: Optional[datetime] = None
-    ) -> PositionUpdate:
-        return PositionUpdate(
-            timestamp=timestamp or datetime.now(),
+    ) -> MeshEvent:
+        payload = {
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        if altitude is not None:
+            payload["altitude"] = altitude
+        return EventFactory.mesh_event(
             node_id=node_id,
-            latitude=latitude,
-            longitude=longitude,
-            altitude=altitude,
-            precision_bits=precision_bits
-        )
-    @staticmethod
-    def node_info(
-        node_id: str = "!node1234",
-        user_id: str = "!user5678",
-        long_name: str = "Test User",
-        short_name: str = "TU",
-        hardware_model: str = "TBEAM",
-        role: str = "CLIENT",
-        timestamp: Optional[datetime] = None
-    ) -> NodeInfo:
-        return NodeInfo(
-            timestamp=timestamp or datetime.now(),
-            node_id=node_id,
-            user_id=user_id,
-            long_name=long_name,
-            short_name=short_name,
-            hardware_model=hardware_model,
-            role=role
+            event_type="position",
+            payload=payload,
+            timestamp=timestamp
         )
 
 
@@ -114,37 +86,34 @@ class StateFactory:
     @staticmethod
     def node_state(
         node_id: str = "!node1234",
-        long_name: str = "Test Node",
-        short_name: str = "TN",
-        hardware_model: str = "TBEAM",
-        role: str = "CLIENT",
         first_seen: Optional[datetime] = None,
         last_seen: Optional[datetime] = None,
-        battery_level: Optional[int] = None,
-        latitude: Optional[float] = None,
-        longitude: Optional[float] = None
+        event_count: int = 0,
+        last_telemetry: Optional[dict[str, Any]] = None,
+        last_position: Optional[dict[str, Any]] = None,
+        last_text: Optional[str] = None
     ) -> NodeState:
         now = datetime.now()
         return NodeState(
-            node_id=node_id,
-            long_name=long_name,
-            short_name=short_name,
-            hardware_model=hardware_model,
-            role=role,
+            node_id=NodeId(value=node_id),
             first_seen=first_seen or now,
             last_seen=last_seen or now,
-            battery_level=battery_level,
-            latitude=latitude,
-            longitude=longitude
+            event_count=event_count,
+            last_telemetry=last_telemetry,
+            last_position=last_position,
+            last_text=last_text
         )
 
 
 def create_event_sequence(node_id: str, count: int = 5):
     base_time = datetime.now()
     events = []
-    events.append(EventFactory.node_discovered(node_id=node_id, timestamp=base_time))
     for i in range(count):
-        timestamp = base_time + timedelta(minutes=i + 1)
-        events.append(EventFactory.telemetry_received(node_id=node_id, timestamp=timestamp))
+        timestamp = base_time + timedelta(minutes=i)
+        events.append(EventFactory.telemetry_event(
+            node_id=node_id,
+            battery_level=85 - i,
+            timestamp=timestamp
+        ))
     return events
 

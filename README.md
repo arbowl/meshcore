@@ -17,16 +17,61 @@ Install dependencies:
 uv sync
 ```
 
-Run the core service:
+## Running the Service
+
+MeshCore supports both interactive and CLI modes for flexible configuration.
+
+### Interactive Mode (Beginner-Friendly)
+
+Run without arguments to get guided prompts:
 ```bash
-uv run meshtastic-hexagonal
+python -m meshcore.main
 ```
 
-This will:
+You'll be prompted to choose:
+- Event source (Mock, Serial USB, or TCP/IP)
+- Device configuration
+- MQTT settings
+
+### CLI Mode (Automation & Scripts)
+
+Use command-line arguments for scripting and automation:
+
+```bash
+# Mock data for testing
+python -m meshcore.main --source mock --mock-interval 1.5
+
+# Real device via USB (auto-detect)
+python -m meshcore.main --source serial
+
+# Real device via USB (specific port)
+python -m meshcore.main --source serial --device COM3
+
+# Real device via TCP/IP network
+python -m meshcore.main --source tcp --tcp-host 192.168.1.100
+
+# Disable MQTT (console logging only)
+python -m meshcore.main --source mock --no-mqtt
+
+# Custom MQTT broker
+python -m meshcore.main --source serial --mqtt-host mqtt.local
+
+# Show all options
+python -m meshcore.main --help
+```
+
+Or use the installed script:
+```bash
+uv run meshtastic-hexagonal --source mock
+```
+
+### What It Does
+
+The service will:
 - Connect to a Meshtastic device (or use mock data)
 - Store events in `events.db`
 - Project state to `state.db`
-- Publish events to MQTT (localhost:1883)
+- Publish events to MQTT (localhost:1883 by default)
 
 You'll need an MQTT broker running. For example, using Mosquitto:
 ```bash
@@ -71,7 +116,7 @@ Key components:
 - State projection builds queryable views from events
 
 **Adapters** (`adapters/`):
-- Meshtastic: Serial interface and mock data sources
+- Meshtastic: Serial, TCP/IP, and mock data sources
 - Storage: SQLite implementations of event and state stores
 - PubSub: MQTT event publishing
 - UI: Web dashboard and terminal UI

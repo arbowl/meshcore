@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from meshcore.adapters.storage.sqlite import SqliteEventStore
+from meshcore.application.ports import EventQueryPort
 
 
 @dataclass
@@ -29,8 +29,8 @@ class TelemetryStats:
 class TelemetryQueryService:
     """Query and aggregate telemetry data"""
 
-    def __init__(self, event_store: SqliteEventStore):
-        self._event_store = event_store
+    def __init__(self, event_query: EventQueryPort):
+        self._event_query = event_query
 
     async def get_time_series(
         self,
@@ -43,7 +43,7 @@ class TelemetryQueryService:
         if since is None:
             since = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        events = await self._event_store.get_telemetry_series(
+        events = await self._event_query.get_telemetry_series(
             node_id=node_id,
             since=since,
             limit=limit,
@@ -96,7 +96,7 @@ class TelemetryQueryService:
         if since is None:
             since = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        events = await self._event_store.get_telemetry_series(
+        events = await self._event_query.get_telemetry_series(
             node_id=node_id,
             since=since,
             limit=1000,

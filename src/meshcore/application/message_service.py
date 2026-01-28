@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from meshcore.adapters.storage.sqlite import SqliteEventStore
+from meshcore.application.ports import EventQueryPort
 from meshcore.domain.models import MeshEvent
 
 
@@ -23,8 +23,8 @@ class Message:
 class MessageQueryService:
     """Query and filter messages from event store"""
 
-    def __init__(self, event_store: SqliteEventStore):
-        self._event_store = event_store
+    def __init__(self, event_query: EventQueryPort):
+        self._event_query = event_query
 
     async def get_recent_messages(
         self,
@@ -35,7 +35,7 @@ class MessageQueryService:
         if since is None:
             since = datetime.now(timezone.utc) - timedelta(days=7)
 
-        events = await self._event_store.query_by_type(
+        events = await self._event_query.query_by_type(
             event_type="text",
             since=since,
             limit=limit,
@@ -49,7 +49,7 @@ class MessageQueryService:
     ) -> list[Message]:
         """Get messages from a specific node"""
         since = datetime.now(timezone.utc) - timedelta(days=30)
-        events = await self._event_store.query_by_type(
+        events = await self._event_query.query_by_type(
             event_type="text",
             node_id=node_id,
             since=since,
@@ -63,7 +63,7 @@ class MessageQueryService:
         limit: int = 100,
     ) -> list[Message]:
         """Search messages by text content"""
-        events = await self._event_store.search_messages(query, limit)
+        events = await self._event_query.search_messages(query, limit)
         return [Message(event) for event in events]
 
     async def get_conversation(
@@ -75,13 +75,13 @@ class MessageQueryService:
         """Get messages between two nodes"""
         # Get messages from both nodes
         since = datetime.now(timezone.utc) - timedelta(days=30)
-        events_a = await self._event_store.query_by_type(
+        events_a = await self._event_query.query_by_type(
             event_type="text",
             node_id=node_a,
             since=since,
             limit=limit,
         )
-        events_b = await self._event_store.query_by_type(
+        events_b = await self._event_query.query_by_type(
             event_type="text",
             node_id=node_b,
             since=since,

@@ -16,6 +16,7 @@ from meshcore.adapters.storage.sqlite import SqliteEventStore
 from meshcore.adapters.storage.state_sqlite import SqliteStateStore
 from meshcore.application.services import MeshEventService
 from meshcore.application.state_projection import StateProjection
+from meshcore.config import MeshCoreConfig
 
 # Configure logging
 logging.basicConfig(
@@ -25,19 +26,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class Config:
-    """Configuration container"""
-    def __init__(self):
-        self.source_type = "mock"
-        self.device = None
-        self.tcp_host = None
-        self.mock_interval = 1.5
-        self.mqtt_enabled = True
-        self.mqtt_host = "localhost"
-        self.mqtt_topic = "meshcore/events"
-
-
-def parse_args():
+def parse_args() -> MeshCoreConfig | None:
+    """Parse command line arguments and return config"""
     parser = argparse.ArgumentParser(
         description="MeshCore Event Service",
         add_help=True
@@ -61,18 +51,28 @@ def parse_args():
     args = parser.parse_args()
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-    config = Config()
-    config.source_type = args.source
-    config.device = args.device
-    config.tcp_host = args.tcp_host
+    
+    # Start with environment variables, then override with CLI args
+    config = MeshCoreConfig.from_env()
+    
+    if args.source:
+        config.meshtastic_source = args.source
+    if args.device:
+        config.meshtastic_device = args.device
+    if args.tcp_host:
+        config.meshtastic_tcp_host = args.tcp_host
     config.mock_interval = args.mock_interval
     config.mqtt_enabled = not args.no_mqtt
-    config.mqtt_host = args.mqtt_host
-    config.mqtt_topic = args.mqtt_topic
+    if args.mqtt_host:
+        config.mqtt_host = args.mqtt_host
+    if args.mqtt_topic:
+        config.mqtt_topic = args.mqtt_topic
+    
     return config
 
 
-def interactive_config():
+def interactive_config() -> MeshCoreConfig:
+    """Interactive configuration prompts"""
     print("\n=== MeshCore Configuration ===\n")
     print("Select event source:")
     print("  1. Mock (simulated data)")
@@ -80,58 +80,69 @@ def interactive_config():
     print("  3. TCP/IP Network")
     print("  4. Exit")
     choice = input("\nChoice [1-4]: ").strip()
-    config = Config()
+    
+    # Start with environment variables
+    config = MeshCoreConfig.from_env()
+    
     if choice == "1":
-        config.source_type = "mock"
+        config.meshtastic_source = "mock"
         interval = input("Event interval in seconds [1.5]: ").strip()
         config.mock_interval = float(interval) if interval else 1.5
     elif choice == "2":
-        config.source_type = "serial"
+        config.meshtastic_source = "serial"
         device = input("Device port (Enter for auto-detect): ").strip()
-        config.device = device if device else None
+        config.meshtastic_device = device if device else None
     elif choice == "3":
-        config.source_type = "tcp"
+        config.meshtastic_source = "tcp"
         host = input("Device IP address: ").strip()
         if not host:
             print("Error: IP address required")
             sys.exit(1)
-        config.tcp_host = host
+        config.meshtastic_tcp_host = host
     elif choice == "4":
         print("Exiting...")
         sys.exit(0)
     else:
         print("Invalid choice")
         sys.exit(1)
+    
     mqtt = input("\nEnable MQTT publishing? [Y/n]: ").strip().lower()
     config.mqtt_enabled = mqtt != "n"
     if config.mqtt_enabled:
         host = input("MQTT broker host [localhost]: ").strip()
         config.mqtt_host = host if host else "localhost"
+    
     return config
 
 
-def create_source(config):
-    if config.source_type == "mock":
+def create_source(config: MeshCoreConfig):
+    """Create event source based on configuration"""
+    if config.meshtastic_source == "mock":
         logger.info(f"Using MOCK source (interval: {config.mock_interval}s)")
         return MockMeshtasticEventSource(interval=config.mock_interval)
-    elif config.source_type == "serial":
-        device_info = config.device or "auto-detect"
+    elif config.meshtastic_source == "serial":
+        device_info = config.meshtastic_device or "auto-detect"
         logger.info(f"Using SERIAL source: {device_info}")
-        return MeshtasticSource(device=config.device)
-    elif config.source_type == "tcp":
-        logger.info(f"Using TCP source: {config.tcp_host}")
-        return MeshtasticTcpSource(host=config.tcp_host)
+        return MeshtasticSource(device=config.meshtastic_device)
+    elif config.meshtastic_source == "tcp":
+        logger.info(f"Using TCP source: {config.meshtastic_tcp_host}")
+        return MeshtasticTcpSource(host=config.meshtastic_tcp_host)
     else:
-        raise ValueError(f"Unknown source type: {config.source_type}")
+        raise ValueError(f"Unknown source type: {config.meshtastic_source}")
 
 
-async def create_publisher(config):
+async def create_publisher(config: MeshCoreConfig):
     """Create and initialize publisher with proper lifecycle"""
     if config.mqtt_enabled:
-        logger.info(f"MQTT publishing enabled: {config.mqtt_host}")
+        logger.info(
+            f"MQTT publishing enabled: "
+            f"{config.mqtt_host}:{config.mqtt_port}"
+        )
         publisher = MqttEventPublisher(
             host=config.mqtt_host,
-            topic=config.mqtt_topic
+            port=config.mqtt_port,
+            topic=config.mqtt_topic,
+            client_id=config.mqtt_client_id,
         )
         await publisher.__aenter__()
         return publisher
@@ -140,7 +151,7 @@ async def create_publisher(config):
         return LoggingPublisher()
 
 
-async def main_loop(config):
+async def main_loop(config: MeshCoreConfig):
     """Main service loop with proper resource management"""
     source = create_source(config)
     publisher = None
@@ -148,18 +159,20 @@ async def main_loop(config):
     state_store = None
     try:
         publisher = await create_publisher(config)
-        event_store = SqliteEventStore()
+        event_store = SqliteEventStore(path=config.event_db_path)
         await event_store.__aenter__()
-        state_store = SqliteStateStore()
+        state_store = SqliteStateStore(path=config.state_db_path)
         await state_store.__aenter__()
         state_projection = StateProjection(state_store)
-        logger.info("Starting MeshCore service...")
+        logger.info(f"Starting MeshCore service with config: {config}")
         logger.info("Press Ctrl+C to stop\n")
         service = MeshEventService(
             source=source,
             store=event_store,
             publisher=publisher,
             state_projection=state_projection,
+            max_retries=config.max_retries,
+            retry_delay=config.retry_delay,
         )
         await service.run()
     except asyncio.CancelledError:

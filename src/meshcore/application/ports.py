@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import AsyncIterator, Optional, Protocol
+from uuid import UUID
 
 from meshcore.domain.models import MeshEvent, NodeId, NodeState
 
@@ -30,12 +31,47 @@ class EventPublisher(Protocol):
 
 
 class EventStore(Protocol):
-    """Interface for an event store"""
+    """Interface for an event store - basic append and replay"""
 
     async def append(self, event: MeshEvent) -> None: ...
+
     async def replay(
         self, since: Optional[datetime], until: Optional[datetime]
     ) -> AsyncIterator[MeshEvent]: ...
+
+    async def event_exists(self, event_id: UUID) -> bool:
+        """Check if an event already exists (for deduplication)"""
+
+    async def close(self) -> None:
+        """Close the store and cleanup resources"""
+
+
+class EventQueryPort(Protocol):
+    """Interface for querying events - separates writes from reads"""
+
+    async def query_by_type(
+        self,
+        event_type: str,
+        since: Optional[datetime] = None,
+        node_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[MeshEvent]:
+        """Query events by type with optional filters"""
+
+    async def get_telemetry_series(
+        self,
+        node_id: str,
+        since: datetime,
+        limit: int = 1000,
+    ) -> list[MeshEvent]:
+        """Get telemetry events for a node as time series"""
+
+    async def search_messages(
+        self,
+        search_term: str,
+        limit: int = 100,
+    ) -> list[MeshEvent]:
+        """Search text messages"""
 
 
 class MeshInputPort(Protocol):
@@ -69,6 +105,7 @@ class StateStore(Protocol):
     """Interface for storing and querying node state"""
 
     async def upsert_node(self, state: NodeState) -> None: ...
-    async def get_node(self, node_id: NodeId) -> NodeState | None: ...
+    async def get_node(self, node_id: NodeId) -> Optional[NodeState]: ...
     async def list_nodes(self) -> list[NodeState]: ...
     async def delete_node(self, node_id: NodeId) -> None: ...
+    async def close(self) -> None: ...

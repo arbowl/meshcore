@@ -33,7 +33,11 @@ class EventPublisher(Protocol):
 class EventStore(Protocol):
     """Interface for an event store - basic append and replay"""
 
-    async def append(self, event: MeshEvent) -> None: ...
+    async def append(self, event: MeshEvent) -> bool:
+        """Append event to store.
+
+        Returns True if inserted, False if duplicate.
+        """
 
     async def replay(
         self, since: Optional[datetime], until: Optional[datetime]

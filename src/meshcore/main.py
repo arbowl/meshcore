@@ -1,7 +1,10 @@
-"""Main entry point with flexible configuration"""
+"""Main entry point with flexible configuration and proper lifecycle
+management
+"""
 
 import argparse
 import asyncio
+import logging
 import sys
 
 from meshcore.adapters.meshtastic.mock import MockMeshtasticEventSource
@@ -13,6 +16,13 @@ from meshcore.adapters.storage.sqlite import SqliteEventStore
 from meshcore.adapters.storage.state_sqlite import SqliteStateStore
 from meshcore.application.services import MeshEventService
 from meshcore.application.state_projection import StateProjection
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 class Config:
@@ -43,9 +53,14 @@ def parse_args():
     parser.add_argument("--mqtt-host", default="localhost")
     parser.add_argument("--mqtt-topic", default="meshcore/events")
     parser.add_argument("--no-mqtt", action="store_true")
+    parser.add_argument(
+        "--debug", action="store_true", help="Enable debug logging"
+    )
     if len(sys.argv) == 1:
         return None
     args = parser.parse_args()
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
     config = Config()
     config.source_type = args.source
     config.device = args.device
@@ -97,45 +112,79 @@ def interactive_config():
 
 def create_source(config):
     if config.source_type == "mock":
-        print(f"Using MOCK source (interval: {config.mock_interval}s)")
+        logger.info(f"Using MOCK source (interval: {config.mock_interval}s)")
         return MockMeshtasticEventSource(interval=config.mock_interval)
     elif config.source_type == "serial":
         device_info = config.device or "auto-detect"
-        print(f"Using SERIAL source: {device_info}")
+        logger.info(f"Using SERIAL source: {device_info}")
         return MeshtasticSource(device=config.device)
     elif config.source_type == "tcp":
-        print(f"Using TCP source: {config.tcp_host}")
+        logger.info(f"Using TCP source: {config.tcp_host}")
         return MeshtasticTcpSource(host=config.tcp_host)
     else:
         raise ValueError(f"Unknown source type: {config.source_type}")
 
 
-def create_publisher(config):
+async def create_publisher(config):
+    """Create and initialize publisher with proper lifecycle"""
     if config.mqtt_enabled:
-        print(f"MQTT publishing enabled: {config.mqtt_host}")
-        return MqttEventPublisher(
+        logger.info(f"MQTT publishing enabled: {config.mqtt_host}")
+        publisher = MqttEventPublisher(
             host=config.mqtt_host,
             topic=config.mqtt_topic
         )
+        await publisher.__aenter__()
+        return publisher
     else:
-        print("MQTT disabled, using console logging")
+        logger.info("MQTT disabled, using console logging")
         return LoggingPublisher()
 
 
 async def main_loop(config):
+    """Main service loop with proper resource management"""
     source = create_source(config)
-    publisher = create_publisher(config)
-    state_store = SqliteStateStore()
-    state_projection = StateProjection(state_store)
-    print("\nStarting MeshCore service...")
-    print("Press Ctrl+C to stop\n")
-    service = MeshEventService(
-        source=source,
-        store=SqliteEventStore(),
-        publisher=publisher,
-        state_projection=state_projection,
-    )
-    await service.run()
+    publisher = None
+    event_store = None
+    state_store = None
+    try:
+        publisher = await create_publisher(config)
+        event_store = SqliteEventStore()
+        await event_store.__aenter__()
+        state_store = SqliteStateStore()
+        await state_store.__aenter__()
+        state_projection = StateProjection(state_store)
+        logger.info("Starting MeshCore service...")
+        logger.info("Press Ctrl+C to stop\n")
+        service = MeshEventService(
+            source=source,
+            store=event_store,
+            publisher=publisher,
+            state_projection=state_projection,
+        )
+        await service.run()
+    except asyncio.CancelledError:
+        logger.info("Service shutdown requested")
+    except Exception as e:
+        logger.error(f"Service error: {e}", exc_info=True)
+        raise
+    finally:
+        logger.info("Cleaning up resources...")
+        if publisher and config.mqtt_enabled:
+            try:
+                await publisher.__aexit__(None, None, None)
+            except Exception as e:
+                logger.error(f"Error closing publisher: {e}")
+        if event_store:
+            try:
+                await event_store.__aexit__(None, None, None)
+            except Exception as e:
+                logger.error(f"Error closing event store: {e}")
+        if state_store:
+            try:
+                await state_store.__aexit__(None, None, None)
+            except Exception as e:
+                logger.error(f"Error closing state store: {e}")
+        logger.info("Shutdown complete")
 
 
 def main():
@@ -145,9 +194,9 @@ def main():
             config = interactive_config()
         asyncio.run(main_loop(config))
     except KeyboardInterrupt:
-        print("\n\nShutdown requested. Goodbye!")
+        logger.info("\n\nShutdown requested. Goodbye!")
     except Exception as e:
-        print(f"\nError: {e}")
+        logger.error(f"\nError: {e}", exc_info=True)
         sys.exit(1)
 
 

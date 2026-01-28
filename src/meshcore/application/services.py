@@ -41,21 +41,21 @@ class MeshEventService:
             async for event in self._source.events():
                 correlation_id = str(event.event_id.value)
                 try:
-                    if await self._store.event_exists(event.event_id.value):
+                    was_processed = await self._process_event_with_retry(event, correlation_id)
+                    if was_processed:
+                        self._processed_count += 1
+                        if self._processed_count % 100 == 0:
+                            logger.info(
+                                f"Processed {self._processed_count} events "
+                                f"(errors: {self._error_count}, "
+                                f"duplicates: {self._duplicate_count})"
+                            )
+                    else:
                         self._duplicate_count += 1
                         logger.debug(
                             f"Skipping duplicate event from "
                             f"{event.node_id.value}",
                             extra={"correlation_id": correlation_id}
-                        )
-                        continue
-                    await self._process_event_with_retry(event, correlation_id)
-                    self._processed_count += 1
-                    if self._processed_count % 100 == 0:
-                        logger.info(
-                            f"Processed {self._processed_count} events "
-                            f"(errors: {self._error_count}, "
-                            f"duplicates: {self._duplicate_count})"
                         )
                 except Exception as e:
                     self._error_count += 1
@@ -81,11 +81,21 @@ class MeshEventService:
 
     async def _process_event_with_retry(
         self, event: MeshEvent, correlation_id: str
-    ) -> None:
-        """Process a single event with retry logic"""
+    ) -> bool:
+        """Process a single event with retry logic
+
+        Returns:
+            True if event was processed (inserted), False if duplicate
+        """
         for attempt in range(self._max_retries):
             try:
-                await self._store.append(event)
+                was_inserted = await self._store.append(event)
+
+                # If it was a duplicate, return early
+                if not was_inserted:
+                    return False
+
+                # Process the new event
                 if self._state_projection:
                     await self._state_projection.project(event)
                 try:
@@ -100,7 +110,7 @@ class MeshEventService:
                     f"{event.node_id.value}",
                     extra={"correlation_id": correlation_id}
                 )
-                return
+                return True
             except Exception as e:
                 if attempt < self._max_retries - 1:
                     logger.warning(
@@ -114,3 +124,4 @@ class MeshEventService:
                         extra={"correlation_id": correlation_id}
                     )
                     raise
+        return False

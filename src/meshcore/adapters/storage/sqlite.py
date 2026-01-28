@@ -83,13 +83,17 @@ class SqliteEventStore:
             self._closed = True
             logger.info("Event store connection closed")
 
-    async def append(self, event: MeshEvent) -> None:
-        """Append a MeshEvent to the store"""
+    async def append(self, event: MeshEvent) -> bool:
+        """Append a MeshEvent to the store
+        
+        Returns:
+            True if event was inserted, False if it was a duplicate
+        """
         await self._ensure_connection()
 
         def _insert():
             try:
-                self._conn.execute(
+                cursor = self._conn.execute(
                     """
                     INSERT OR IGNORE INTO events (
                         id,
@@ -112,13 +116,15 @@ class SqliteEventStore:
                     ),
                 )
                 self._conn.commit()
+                # If rowcount is 0, the insert was ignored (duplicate)
+                return cursor.rowcount > 0
             except sqlite3.Error as e:
                 logger.error(f"Failed to append event "
                              f"{event.event_id.value}: {e}")
                 raise
 
         async with self._lock:
-            await asyncio.to_thread(_insert)
+            return await asyncio.to_thread(_insert)
 
     async def replay(
         self,
@@ -168,6 +174,19 @@ class SqliteEventStore:
         async with self._lock:
             return await asyncio.to_thread(_check)
 
+
+class SqliteEventQuery:
+    """SQLite query adapter implementing EventQueryPort (read-only)
+
+    This class shares a database connection with SqliteEventStore but
+    provides only query operations. For proper separation of concerns,
+    use this for reads and SqliteEventStore for writes.
+    """
+
+    def __init__(self, event_store: SqliteEventStore) -> None:
+        """Initialize with event store for shared connection"""
+        self._store = event_store
+
     async def query_by_type(
         self,
         event_type: str,
@@ -176,7 +195,7 @@ class SqliteEventStore:
         limit: int = 100,
     ) -> list[MeshEvent]:
         """Query events by type with optional filters"""
-        await self._ensure_connection()
+        await self._store._ensure_connection()
 
         def _query():
             query = "SELECT * FROM events WHERE event_type = ?"
@@ -193,10 +212,10 @@ class SqliteEventStore:
             query += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
 
-            cur = self._conn.execute(query, params)
+            cur = self._store._conn.execute(query, params)
             return cur.fetchall()
 
-        async with self._lock:
+        async with self._store._lock:
             rows = await asyncio.to_thread(_query)
         return [
             MeshEvent(
@@ -218,7 +237,7 @@ class SqliteEventStore:
         limit: int = 1000,
     ) -> list[MeshEvent]:
         """Get telemetry events for a node as time series"""
-        await self._ensure_connection()
+        await self._store._ensure_connection()
 
         def _query():
             query = """
@@ -229,12 +248,12 @@ class SqliteEventStore:
                 ORDER BY timestamp ASC
                 LIMIT ?
             """
-            cur = self._conn.execute(
+            cur = self._store._conn.execute(
                 query, (node_id, since.isoformat(), limit)
             )
             return cur.fetchall()
 
-        async with self._lock:
+        async with self._store._lock:
             rows = await asyncio.to_thread(_query)
         return [
             MeshEvent(
@@ -255,7 +274,7 @@ class SqliteEventStore:
         limit: int = 100,
     ) -> list[MeshEvent]:
         """Search text messages"""
-        await self._ensure_connection()
+        await self._store._ensure_connection()
 
         def _query():
             query = """
@@ -265,10 +284,12 @@ class SqliteEventStore:
                 ORDER BY timestamp DESC
                 LIMIT ?
             """
-            cur = self._conn.execute(query, (f"%{search_term}%", limit))
+            cur = self._store._conn.execute(
+                query, (f"%{search_term}%", limit)
+            )
             return cur.fetchall()
 
-        async with self._lock:
+        async with self._store._lock:
             rows = await asyncio.to_thread(_query)
         return [
             MeshEvent(

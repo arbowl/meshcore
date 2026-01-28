@@ -1,15 +1,45 @@
 """Web UI adapter using Flask and HTMX - Complete HQ Dashboard"""
 
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, render_template, jsonify, request, Response
 
 from meshcore.adapters.storage.state_sqlite import SqliteStateStore
-from meshcore.adapters.storage.sqlite import SqliteEventStore
+from meshcore.adapters.storage.sqlite import (
+    SqliteEventStore,
+    SqliteEventQuery,
+)
 from meshcore.adapters.meshtastic.commander import MockCommander
 from meshcore.application.message_service import MessageQueryService
 from meshcore.application.telemetry_service import TelemetryQueryService
+
+logger = logging.getLogger(__name__)
+
+
+async def _initialize_stores(app: Flask) -> None:
+    """Initialize database connections for stores"""
+    try:
+        await app.config['STATE_STORE'].__aenter__()
+        await app.config['EVENT_STORE'].__aenter__()
+        logger.info("Database connections initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database connections: {e}")
+        raise
+
+
+async def _cleanup_stores(app: Flask) -> None:
+    """Clean up database connections"""
+    try:
+        if 'STATE_STORE' in app.config:
+            await app.config['STATE_STORE'].__aexit__(None, None, None)
+        if 'EVENT_STORE' in app.config:
+            await app.config['EVENT_STORE'].__aexit__(None, None, None)
+        logger.info("Database connections closed successfully")
+    except Exception as e:
+        logger.error(f"Error during database cleanup: {e}")
 
 
 def create_app(
@@ -24,12 +54,29 @@ def create_app(
         static_folder=str(Path(__file__).parent / "static"),
     )
     
-    # Initialize services
+    # Initialize services (connections established on first use or via init)
     app.config['STATE_STORE'] = SqliteStateStore(path=state_db_path)
     app.config['EVENT_STORE'] = SqliteEventStore(path=events_db_path)
-    app.config['MESSAGE_SERVICE'] = MessageQueryService(app.config['EVENT_STORE'])
-    app.config['TELEMETRY_SERVICE'] = TelemetryQueryService(app.config['EVENT_STORE'])
+    app.config['EVENT_QUERY'] = SqliteEventQuery(
+        app.config['EVENT_STORE']
+    )
+    app.config['MESSAGE_SERVICE'] = MessageQueryService(
+        app.config['EVENT_QUERY']
+    )
+    app.config['TELEMETRY_SERVICE'] = TelemetryQueryService(
+        app.config['EVENT_QUERY']
+    )
     app.config['COMMANDER'] = commander or MockCommander()
+    app.config['STORES_INITIALIZED'] = False
+    
+    # ==================== Lifecycle Hooks ====================
+    
+    @app.before_request
+    def ensure_stores_initialized():
+        """Ensure database connections are initialized before first request"""
+        if not app.config['STORES_INITIALIZED']:
+            asyncio.run(_initialize_stores(app))
+            app.config['STORES_INITIALIZED'] = True
     
     # ==================== Dashboard Routes ====================
     
@@ -39,20 +86,28 @@ def create_app(
         return render_template("index.html")
     
     @app.route("/nodes")
-    async def nodes_table():
+    def nodes_table():
         """HTMX endpoint - returns just the nodes table HTML"""
         state_store = app.config['STATE_STORE']
-        nodes = await state_store.list_nodes()
-        return render_template("nodes_table.html", nodes=nodes, now=datetime.now(timezone.utc))
+        nodes = asyncio.run(state_store.list_nodes())
+        return render_template(
+            "nodes_table.html",
+            nodes=nodes,
+            now=datetime.now(timezone.utc)
+        )
     
     @app.route("/stats")
-    async def stats():
+    def stats():
         """HTMX endpoint - returns stats summary"""
         state_store = app.config['STATE_STORE']
-        nodes = await state_store.list_nodes()
+        nodes = asyncio.run(state_store.list_nodes())
         
         total_nodes = len(nodes)
-        active_nodes = sum(1 for n in nodes if (datetime.now(timezone.utc) - n.last_seen).total_seconds() < 300)
+        now = datetime.now(timezone.utc)
+        active_nodes = sum(
+            1 for n in nodes
+            if (now - n.last_seen).total_seconds() < 300
+        )
         total_events = sum(n.event_count for n in nodes)
         
         return render_template(
@@ -70,7 +125,7 @@ def create_app(
         return render_template("messages.html")
     
     @app.route("/messages/list")
-    async def messages_list():
+    def messages_list():
         """HTMX endpoint - returns messages list"""
         msg_service = app.config['MESSAGE_SERVICE']
         
@@ -80,19 +135,23 @@ def create_app(
         limit = int(request.args.get('limit', 100))
         
         if search:
-            messages = await msg_service.search_messages(search, limit)
+            messages = asyncio.run(
+                msg_service.search_messages(search, limit)
+            )
         elif node_id:
-            messages = await msg_service.get_messages_by_node(node_id, limit)
+            messages = asyncio.run(
+                msg_service.get_messages_by_node(node_id, limit)
+            )
         else:
-            messages = await msg_service.get_recent_messages(limit)
+            messages = asyncio.run(msg_service.get_recent_messages(limit))
         
         return render_template("messages_list.html", messages=messages)
     
     @app.route("/api/messages")
-    async def api_messages():
+    def api_messages():
         """JSON API for messages"""
         msg_service = app.config['MESSAGE_SERVICE']
-        messages = await msg_service.get_recent_messages(limit=100)
+        messages = asyncio.run(msg_service.get_recent_messages(limit=100))
         
         return jsonify([
             {
@@ -110,14 +169,14 @@ def create_app(
     # ==================== Compose & Send Routes ====================
     
     @app.route("/compose")
-    async def compose_page():
+    def compose_page():
         """Message composition page"""
         state_store = app.config['STATE_STORE']
-        nodes = await state_store.list_nodes()
+        nodes = asyncio.run(state_store.list_nodes())
         return render_template("compose.html", nodes=nodes)
     
     @app.route("/api/send_message", methods=["POST"])
-    async def send_message():
+    def send_message():
         """Send a message through Meshtastic"""
         commander = app.config['COMMANDER']
         
@@ -134,7 +193,7 @@ def create_app(
         if destination == 'broadcast':
             destination = None
         
-        result = await commander.send_text(text, destination, channel)
+        result = asyncio.run(commander.send_text(text, destination, channel))
         
         return render_template("send_result.html", 
                                success=result.success, 
@@ -149,14 +208,16 @@ def create_app(
         return render_template("telemetry.html", node_id=node_id)
     
     @app.route("/api/telemetry/<node_id>/<metric>")
-    async def api_telemetry_metric(node_id: str, metric: str):
+    def api_telemetry_metric(node_id: str, metric: str):
         """Get time-series data for a metric"""
         telemetry_service = app.config['TELEMETRY_SERVICE']
         
         hours = int(request.args.get('hours', 24))
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
-        data_points = await telemetry_service.get_time_series(node_id, metric, since)
+
+        data_points = asyncio.run(
+            telemetry_service.get_time_series(node_id, metric, since)
+        )
         
         return jsonify({
             "metric": metric,
@@ -171,14 +232,16 @@ def create_app(
         })
     
     @app.route("/api/telemetry/<node_id>/all")
-    async def api_telemetry_all(node_id: str):
+    def api_telemetry_all(node_id: str):
         """Get all telemetry metrics for a node"""
         telemetry_service = app.config['TELEMETRY_SERVICE']
         
         hours = int(request.args.get('hours', 24))
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
-        metrics = await telemetry_service.get_all_metrics(node_id, since)
+
+        metrics = asyncio.run(
+            telemetry_service.get_all_metrics(node_id, since)
+        )
         
         return jsonify({
             metric_name: [
@@ -194,46 +257,53 @@ def create_app(
     # ==================== Node Details Route ====================
     
     @app.route("/node/<node_id>")
-    async def node_details(node_id: str):
+    def node_details(node_id: str):
         """Detailed view of a specific node"""
         state_store = app.config['STATE_STORE']
         msg_service = app.config['MESSAGE_SERVICE']
         
         from meshcore.domain.models import NodeId
-        node_state = await state_store.get_node(NodeId(value=node_id))
+        node_state = asyncio.run(state_store.get_node(NodeId(value=node_id)))
         
         if not node_state:
             return "Node not found", 404
         
         # Get recent messages from this node
-        messages = await msg_service.get_messages_by_node(node_id, limit=20)
-        
-        return render_template("node_details.html", 
+        messages = asyncio.run(
+            msg_service.get_messages_by_node(node_id, limit=20)
+        )
+
+        return render_template("node_details.html",
                                node=node_state, 
                                messages=messages)
     
     # ==================== Analytics Route ====================
     
     @app.route("/analytics")
-    async def analytics_page():
+    def analytics_page():
         """Analytics dashboard"""
         state_store = app.config['STATE_STORE']
         msg_service = app.config['MESSAGE_SERVICE']
         
-        nodes = await state_store.list_nodes()
-        messages = await msg_service.get_recent_messages(limit=1000)
+        nodes = asyncio.run(state_store.list_nodes())
+        messages = asyncio.run(msg_service.get_recent_messages(limit=1000))
         
         # Calculate statistics
         total_messages = len(messages)
-        messages_24h = len([m for m in messages 
-                           if (datetime.now(timezone.utc) - m.timestamp).total_seconds() < 86400])
+        now = datetime.now(timezone.utc)
+        messages_24h = len([
+            m for m in messages
+            if (now - m.timestamp).total_seconds() < 86400
+        ])
         
         # Messages per node
         msg_counts = {}
         for msg in messages:
             msg_counts[msg.from_node] = msg_counts.get(msg.from_node, 0) + 1
-        
-        top_senders = sorted(msg_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        top_senders = sorted(
+            msg_counts.items(), key=lambda x: x[1], reverse=True
+        )[:10]
         
         return render_template("analytics.html",
                                nodes=nodes,
@@ -241,7 +311,7 @@ def create_app(
                                messages_24h=messages_24h,
                                top_senders=top_senders)
     
-    # ==================== SSE Route for Real-time Updates ====================
+    # ==================== SSE Route ====================
     
     @app.route("/stream/events")
     def stream_events():
@@ -262,10 +332,10 @@ def create_app(
     # ==================== JSON API Routes ====================
     
     @app.route("/api/nodes")
-    async def api_nodes():
+    def api_nodes():
         """JSON API endpoint for nodes"""
         state_store = app.config['STATE_STORE']
-        nodes = await state_store.list_nodes()
+        nodes = asyncio.run(state_store.list_nodes())
         return jsonify([
             {
                 "node_id": node.node_id.value,

@@ -27,11 +27,21 @@
             <a href="/compose" class="btn btn-primary">New Message</a>
         </div>
 
+        {% if node_id %}
+        <div class="filter-active" style="background: #2a3f5f; padding: 12px; margin-bottom: 20px; border-radius: 4px; border-left: 4px solid #f4c430;">
+            <span>📍 Filtering by node: <strong>{{ node_id }}</strong></span>
+            <a href="/messages" style="color: #f4c430; margin-left: 15px; text-decoration: underline;">Clear filter</a>
+        </div>
+        {% endif %}
+
         <!-- Search and Filter -->
         <div class="filter-bar">
             <form hx-get="/messages/list" 
                   hx-target="#messages-list" 
                   hx-trigger="submit, input delay:500ms from:#search">
+                {% if node_id %}
+                <input type="hidden" name="node_id" value="{{ node_id }}">
+                {% endif %}
                 <input type="text" 
                        id="search" 
                        name="search" 
@@ -44,7 +54,7 @@
         <!-- Messages List -->
         <div class="messages-container">
             <div id="messages-list"
-                 hx-get="/messages/list"
+                 hx-get="/messages/list{% if node_id %}?node_id={{ node_id }}{% endif %}"
                  hx-trigger="load, every 5s"
                  hx-swap="innerHTML">
                 <p class="loading">Loading messages...</p>

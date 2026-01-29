@@ -19,7 +19,8 @@ class SqliteEventStore:
     def __init__(self, path: str = "events.db") -> None:
         self._path = path
         self._conn: Optional[sqlite3.Connection] = None
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+        self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._closed = False
 
     async def __aenter__(self):
@@ -33,6 +34,12 @@ class SqliteEventStore:
 
     async def _ensure_connection(self) -> None:
         """Ensure database connection is established"""
+        # Recreate lock if we're in a different event loop (happens with asyncio.run())
+        current_loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock_loop != current_loop:
+            self._lock = asyncio.Lock()
+            self._lock_loop = current_loop
+        
         if self._conn is None and not self._closed:
             await self._connect()
 

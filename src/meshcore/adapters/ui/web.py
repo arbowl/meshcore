@@ -67,16 +67,9 @@ def create_app(
         app.config['EVENT_QUERY']
     )
     app.config['COMMANDER'] = commander or MockCommander()
-    app.config['STORES_INITIALIZED'] = False
 
-    # ==================== Lifecycle Hooks ====================
-
-    @app.before_request
-    def ensure_stores_initialized():
-        """Ensure database connections are initialized"""
-        if not app.config['STORES_INITIALIZED']:
-            asyncio.run(_initialize_stores(app))
-            app.config['STORES_INITIALIZED'] = True
+    # Note: Stores will initialize lazily on first use within each request's
+    # event loop. This avoids event loop conflicts with asyncio.run() in views.
 
     # ==================== Dashboard Routes ====================
 
@@ -122,7 +115,8 @@ def create_app(
     @app.route("/messages")
     def messages_page():
         """Message history page"""
-        return render_template("messages.html")
+        node_id = request.args.get('node_id')
+        return render_template("messages.html", node_id=node_id)
 
     @app.route("/messages/list")
     def messages_list():

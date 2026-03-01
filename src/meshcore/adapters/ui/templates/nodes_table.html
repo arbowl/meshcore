@@ -3,9 +3,13 @@
     <thead>
         <tr>
             <th>Status</th>
+            <th>Name</th>
             <th>Node ID</th>
             <th>Last Seen</th>
             <th>Events</th>
+            <th>Hops</th>
+            <th>SNR</th>
+            <th>RSSI</th>
             <th>Battery</th>
             <th>Temperature</th>
             <th>Position</th>
@@ -19,13 +23,24 @@
             <td>
                 <span class="status-indicator {{ node.last_seen|status_class }}"></span>
             </td>
+            <td class="node-name">
+                {% if node.long_name %}
+                    <a href="/node/{{ node.node_id.value }}" class="node-link">
+                        {{ node.long_name }}
+                    </a>
+                    {% if node.short_name %}<span class="short-name">({{ node.short_name }})</span>{% endif %}
+                {% else %}
+                    <a href="/node/{{ node.node_id.value }}" class="node-link">-</a>
+                {% endif %}
+            </td>
             <td class="node-id">
-                <a href="/node/{{ node.node_id.value }}" class="node-link">
-                    {{ node.node_id.value }}
-                </a>
+                <code>{{ node.node_id.value }}</code>
             </td>
             <td class="time-ago">{{ node.last_seen|timeago }}</td>
             <td class="event-count">{{ node.event_count }}</td>
+            <td class="hops">{% if node.last_hops_away is not none %}{{ node.last_hops_away }}{% else %}-{% endif %}</td>
+            <td class="snr">{% if node.last_snr is not none %}{{ "%.1f"|format(node.last_snr) }} dB{% else %}-{% endif %}</td>
+            <td class="rssi">{% if node.last_rssi is not none %}{{ node.last_rssi|int }} dBm{% else %}-{% endif %}</td>
             <td class="battery">{{ node.last_telemetry|format_battery }}</td>
             <td class="temperature">{{ node.last_telemetry|format_temp }}</td>
             <td class="position">{{ node.last_position|format_position }}</td>

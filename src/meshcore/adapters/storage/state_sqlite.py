@@ -53,12 +53,17 @@ class SqliteStateStore:
                 """
                 CREATE TABLE IF NOT EXISTS node_states (
                     node_id TEXT PRIMARY KEY,
+                    long_name TEXT,
+                    short_name TEXT,
                     last_seen TEXT NOT NULL,
                     first_seen TEXT NOT NULL,
                     event_count INTEGER NOT NULL,
                     last_telemetry_json TEXT,
                     last_position_json TEXT,
-                    last_text TEXT
+                    last_text TEXT,
+                    last_snr REAL,
+                    last_rssi REAL,
+                    last_hops_away INTEGER
                 )
                 """
             )
@@ -66,6 +71,21 @@ class SqliteStateStore:
                 "CREATE INDEX IF NOT EXISTS idx_states_last_seen ON "
                 "node_states(last_seen)"
             )
+            # Migrate: add name columns if missing
+            existing = {
+                col[1] for col in
+                cur.execute("PRAGMA table_info(node_states)").fetchall()
+            }
+            if "long_name" not in existing:
+                cur.execute("ALTER TABLE node_states ADD COLUMN long_name TEXT")
+            if "short_name" not in existing:
+                cur.execute("ALTER TABLE node_states ADD COLUMN short_name TEXT")
+            if "last_snr" not in existing:
+                cur.execute("ALTER TABLE node_states ADD COLUMN last_snr REAL")
+            if "last_rssi" not in existing:
+                cur.execute("ALTER TABLE node_states ADD COLUMN last_rssi REAL")
+            if "last_hops_away" not in existing:
+                cur.execute("ALTER TABLE node_states ADD COLUMN last_hops_away INTEGER")
             conn.commit()
             return conn
 
@@ -89,28 +109,43 @@ class SqliteStateStore:
                 """
                 INSERT INTO node_states (
                     node_id,
+                    long_name,
+                    short_name,
                     last_seen,
                     first_seen,
                     event_count,
                     last_telemetry_json,
                     last_position_json,
-                    last_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    last_text,
+                    last_snr,
+                    last_rssi,
+                    last_hops_away
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
+                    long_name=COALESCE(excluded.long_name, node_states.long_name),
+                    short_name=COALESCE(excluded.short_name, node_states.short_name),
                     last_seen=excluded.last_seen,
                     event_count=excluded.event_count,
                     last_telemetry_json=excluded.last_telemetry_json,
                     last_position_json=excluded.last_position_json,
-                    last_text=excluded.last_text
+                    last_text=excluded.last_text,
+                    last_snr=COALESCE(excluded.last_snr, node_states.last_snr),
+                    last_rssi=COALESCE(excluded.last_rssi, node_states.last_rssi),
+                    last_hops_away=COALESCE(excluded.last_hops_away, node_states.last_hops_away)
                 """,
                 (
                     state.node_id.value,
+                    state.long_name,
+                    state.short_name,
                     state.last_seen.isoformat(),
                     state.first_seen.isoformat(),
                     state.event_count,
                     json.dumps(state.last_telemetry) if state.last_telemetry else None,  # noqa: E501
                     json.dumps(state.last_position) if state.last_position else None,  # noqa: E501
                     state.last_text,
+                    state.last_snr,
+                    state.last_rssi,
+                    state.last_hops_away,
                 ),
             )
             self._conn.commit()
@@ -135,12 +170,17 @@ class SqliteStateStore:
             return None
         return NodeState(
             node_id=NodeId(value=row["node_id"]),
+            long_name=row["long_name"],
+            short_name=row["short_name"],
             last_seen=datetime.fromisoformat(row["last_seen"]),
             first_seen=datetime.fromisoformat(row["first_seen"]),
             event_count=row["event_count"],
             last_telemetry=json.loads(row["last_telemetry_json"]) if row["last_telemetry_json"] else None,  # noqa: E501
             last_position=json.loads(row["last_position_json"]) if row["last_position_json"] else None,  # noqa: E501
             last_text=row["last_text"],
+            last_snr=row["last_snr"],
+            last_rssi=row["last_rssi"],
+            last_hops_away=row["last_hops_away"],
         )
 
     async def list_nodes(self) -> list[NodeState]:
@@ -157,12 +197,17 @@ class SqliteStateStore:
         return [
             NodeState(
                 node_id=NodeId(value=row["node_id"]),
+                long_name=row["long_name"],
+                short_name=row["short_name"],
                 last_seen=datetime.fromisoformat(row["last_seen"]),
                 first_seen=datetime.fromisoformat(row["first_seen"]),
                 event_count=row["event_count"],
                 last_telemetry=json.loads(row["last_telemetry_json"]) if row["last_telemetry_json"] else None,  # noqa: E501
                 last_position=json.loads(row["last_position_json"]) if row["last_position_json"] else None,  # noqa: E501
                 last_text=row["last_text"],
+                last_snr=row["last_snr"],
+                last_rssi=row["last_rssi"],
+                last_hops_away=row["last_hops_away"],
             )
             for row in rows
         ]

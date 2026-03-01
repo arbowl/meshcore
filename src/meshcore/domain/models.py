@@ -35,9 +35,14 @@ class NodeState(BaseModel):
     """Aggregate state for a node"""
 
     node_id: NodeId
+    long_name: str | None = None
+    short_name: str | None = None
     last_seen: datetime
     first_seen: datetime
     event_count: int = 0
     last_telemetry: dict[str, Any] | None = None
     last_position: dict[str, Any] | None = None
     last_text: str | None = None
+    last_snr: float | None = None
+    last_rssi: float | None = None
+    last_hops_away: int | None = None

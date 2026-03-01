@@ -26,7 +26,8 @@
             <div>
                 <h2>
                     <span class="status-indicator {{ node.last_seen|status_class }}"></span>
-                    {{ node.node_id.value }}
+                    {{ node.long_name or node.node_id.value }}
+                    {% if node.short_name %}<span class="short-name">({{ node.short_name }})</span>{% endif %}
                 </h2>
                 <p class="subtitle">Last seen: {{ node.last_seen|timeago }} ({{ node.last_seen|format_datetime }})</p>
             </div>
@@ -43,7 +44,13 @@
                 <dl>
                     <dt>Node ID</dt>
                     <dd><code>{{ node.node_id.value }}</code></dd>
-                    
+
+                    <dt>Long Name</dt>
+                    <dd>{{ node.long_name or "-" }}</dd>
+
+                    <dt>Short Name</dt>
+                    <dd>{{ node.short_name or "-" }}</dd>
+
                     <dt>First Seen</dt>
                     <dd>{{ node.first_seen|format_datetime }}</dd>
                     
@@ -52,6 +59,15 @@
                     
                     <dt>Total Events</dt>
                     <dd><strong>{{ node.event_count }}</strong></dd>
+
+                    <dt>Hops Away</dt>
+                    <dd>{% if node.last_hops_away is not none %}{{ node.last_hops_away }}{% else %}-{% endif %}</dd>
+
+                    <dt>Last SNR</dt>
+                    <dd>{% if node.last_snr is not none %}{{ "%.1f"|format(node.last_snr) }} dB{% else %}-{% endif %}</dd>
+
+                    <dt>Last RSSI</dt>
+                    <dd>{% if node.last_rssi is not none %}{{ node.last_rssi|int }} dBm{% else %}-{% endif %}</dd>
                 </dl>
             </div>
 

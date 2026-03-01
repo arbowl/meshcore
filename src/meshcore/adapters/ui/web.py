@@ -343,12 +343,16 @@ def create_app(
         return jsonify([
             {
                 "node_id": node.node_id.value,
+                "long_name": node.long_name,
+                "short_name": node.short_name,
                 "last_seen": node.last_seen.isoformat(),
                 "first_seen": node.first_seen.isoformat(),
                 "event_count": node.event_count,
                 "last_telemetry": node.last_telemetry,
                 "last_position": node.last_position,
                 "last_text": node.last_text,
+                "last_snr": node.last_snr,
+                "last_rssi": node.last_rssi,
             }
             for node in nodes
         ])
@@ -399,7 +403,7 @@ def create_app(
         battery = telemetry.get("battery_level")
         if battery is None:
             return "-"
-        return f"{battery}%"
+        return f"{min(int(battery), 100)}%"
 
     @app.template_filter("format_position")
     def format_position(position: dict | None) -> str:

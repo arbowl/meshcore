@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 import meshtastic.serial_interface
+import meshtastic.tcp_interface
 
 from meshcore.application.ports import CommandResult, MeshCommandPort
 
@@ -98,6 +99,71 @@ class MeshtasticCommander(MeshCommandPort):
 
     def close(self) -> None:
         """Close the connection"""
+        if self._interface:
+            self._interface.close()
+            self._interface = None
+
+
+class MeshtasticTcpCommander(MeshCommandPort):
+    """Send commands through Meshtastic TCP interface"""
+
+    def __init__(self, host: str) -> None:
+        self._host = host
+        self._interface: Optional[meshtastic.tcp_interface.TCPInterface] = None
+
+    def _ensure_connected(self) -> None:
+        if self._interface is None:
+            self._interface = meshtastic.tcp_interface.TCPInterface(
+                hostname=self._host
+            )
+
+    async def send_text(
+        self,
+        text: str,
+        destination: Optional[str] = None,
+        channel: int = 0,
+    ) -> CommandResult:
+        """Send text message to the mesh via TCP"""
+        try:
+            self._ensure_connected()
+            dest_id = destination if destination else "^all"
+            await asyncio.to_thread(
+                self._interface.sendText,
+                text,
+                destinationId=dest_id,
+                channelIndex=channel,
+            )
+            logger.info(f"Sent message to {dest_id}: {text[:50]}")
+            return CommandResult(success=True, message=f"Message sent to {dest_id}")
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+            return CommandResult(success=False, message="Failed to send message", error=str(e))
+
+    async def send_position(
+        self,
+        latitude: float,
+        longitude: float,
+        altitude: Optional[float] = None,
+        destination: Optional[str] = None,
+    ) -> CommandResult:
+        """Send position update via TCP"""
+        try:
+            self._ensure_connected()
+            dest_id = destination if destination else "^all"
+            await asyncio.to_thread(
+                self._interface.sendPosition,
+                latitude=latitude,
+                longitude=longitude,
+                altitude=altitude or 0,
+                destinationId=dest_id,
+            )
+            logger.info(f"Sent position to {dest_id}: {latitude}, {longitude}")
+            return CommandResult(success=True, message=f"Position sent to {dest_id}")
+        except Exception as e:
+            logger.error(f"Failed to send position: {e}")
+            return CommandResult(success=False, message="Failed to send position", error=str(e))
+
+    def close(self) -> None:
         if self._interface:
             self._interface.close()
             self._interface = None

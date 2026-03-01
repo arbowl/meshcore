@@ -74,10 +74,25 @@
             <div class="info-card">
                 <h3>Telemetry</h3>
                 {% if node.last_telemetry %}
+                {% set telemetry_units = {
+                    'battery_level': '%',
+                    'voltage': ' V',
+                    'temperature': ' °C',
+                    'humidity': '%',
+                    'pressure': ' hPa',
+                    'channel_utilization': '%',
+                    'air_util_tx': '%',
+                    'ch1_voltage': ' V',
+                    'ch1_current': ' mA'
+                } %}
                 <dl>
                     {% for key, value in node.last_telemetry.items() %}
+                    {% if key == 'raw' %}
+                    <pre class="raw-value">{{ value }}</pre>
+                    {% else %}
                     <dt>{{ key|replace('_', ' ')|title }}</dt>
-                    <dd>{{ value }}</dd>
+                    <dd>{{ value }}{{ telemetry_units.get(key, '') }}</dd>
+                    {% endif %}
                     {% endfor %}
                 </dl>
                 {% else %}
@@ -88,10 +103,22 @@
             <div class="info-card">
                 <h3>Position</h3>
                 {% if node.last_position %}
+                {% set position_units = {
+                    'altitude': ' m',
+                    'speed': ' km/h',
+                    'heading': '°'
+                } %}
                 <dl>
                     {% for key, value in node.last_position.items() %}
+                    {% if key == 'raw' %}
+                    <pre class="raw-value">{{ value }}</pre>
+                    {% elif key in ('latitude', 'longitude') %}
+                    <dt>{{ key|title }}</dt>
+                    <dd>{{ "%.6f"|format(value) }}</dd>
+                    {% else %}
                     <dt>{{ key|replace('_', ' ')|title }}</dt>
-                    <dd>{{ value }}</dd>
+                    <dd>{{ value }}{{ position_units.get(key, '') }}</dd>
+                    {% endif %}
                     {% endfor %}
                 </dl>
                 {% else %}

@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
+from typing import Optional
 
 from meshcore.domain.models import NodeId, NodeState
 
@@ -86,6 +87,58 @@ class SqliteStateStore:
                 cur.execute("ALTER TABLE node_states ADD COLUMN last_rssi REAL")
             if "last_hops_away" not in existing:
                 cur.execute("ALTER TABLE node_states ADD COLUMN last_hops_away INTEGER")
+            # Migrate: if old schema had packet_id as PK (no auto-increment id),
+            # rebuild the table before creating indexes.
+            existing_sent = {
+                col[1]
+                for col in cur.execute(
+                    "PRAGMA table_info(sent_messages)"
+                ).fetchall()
+            }
+            if existing_sent and "id" not in existing_sent:
+                cur.execute(
+                    "ALTER TABLE sent_messages RENAME TO sent_messages_old"
+                )
+                existing_sent = set()  # trigger full recreation below
+
+            if not existing_sent:
+                cur.execute(
+                    """
+                    CREATE TABLE sent_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        packet_id INTEGER,
+                        text TEXT NOT NULL,
+                        destination TEXT,
+                        channel INTEGER NOT NULL DEFAULT 0,
+                        sent_at TEXT NOT NULL,
+                        ack_at TEXT,
+                        ack_from TEXT,
+                        error_reason TEXT
+                    )
+                    """
+                )
+                if cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name='sent_messages_old'"
+                ).fetchone():
+                    cur.execute(
+                        "INSERT INTO sent_messages "
+                        "(packet_id, text, destination, channel, sent_at, "
+                        " ack_at, ack_from, error_reason) "
+                        "SELECT packet_id, text, destination, channel, sent_at, "
+                        "       ack_at, ack_from, error_reason "
+                        "FROM sent_messages_old"
+                    )
+                    cur.execute("DROP TABLE sent_messages_old")
+
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sent_messages_sent_at ON "
+                "sent_messages(sent_at)"
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sent_messages_packet_id ON "
+                "sent_messages(packet_id) WHERE packet_id IS NOT NULL"
+            )
             conn.commit()
             return conn
 
@@ -225,3 +278,80 @@ class SqliteStateStore:
 
         async with self._lock:
             await asyncio.to_thread(_delete)
+
+    async def store_sent_message(
+        self,
+        text: str,
+        destination: str,
+        channel: int,
+        sent_at: datetime,
+        packet_id: Optional[int] = None,
+    ) -> None:
+        """Record an outgoing message for ACK tracking."""
+        await self._ensure_connection()
+
+        def _insert():
+            self._conn.execute(
+                """
+                INSERT INTO sent_messages
+                    (packet_id, text, destination, channel, sent_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (packet_id, text, destination, channel, sent_at.isoformat()),
+            )
+            self._conn.commit()
+
+        async with self._lock:
+            await asyncio.to_thread(_insert)
+
+    async def mark_acked(
+        self,
+        packet_id: int,
+        acking_node: str,
+        error_reason: str,
+        ack_at: datetime,
+    ) -> None:
+        """Update ACK status when a ROUTING_APP packet arrives."""
+        await self._ensure_connection()
+
+        def _update():
+            self._conn.execute(
+                """
+                UPDATE sent_messages
+                SET ack_at = ?, ack_from = ?, error_reason = ?
+                WHERE packet_id = ?
+                """,
+                (ack_at.isoformat(), acking_node, error_reason, packet_id),
+            )
+            self._conn.commit()
+
+        async with self._lock:
+            await asyncio.to_thread(_update)
+
+    async def get_sent_messages(self, limit: int = 100) -> list[dict]:
+        """Return recently sent messages with their ACK status."""
+        await self._ensure_connection()
+
+        def _query():
+            cur = self._conn.execute(
+                "SELECT * FROM sent_messages ORDER BY sent_at DESC LIMIT ?",
+                (limit,),
+            )
+            return cur.fetchall()
+
+        async with self._lock:
+            rows = await asyncio.to_thread(_query)
+
+        result = []
+        for row in rows:
+            result.append({
+                "packet_id": row["packet_id"],
+                "text": row["text"],
+                "destination": row["destination"],
+                "channel": row["channel"],
+                "sent_at": datetime.fromisoformat(row["sent_at"]),
+                "ack_at": datetime.fromisoformat(row["ack_at"]) if row["ack_at"] else None,
+                "ack_from": row["ack_from"],
+                "error_reason": row["error_reason"],
+            })
+        return result

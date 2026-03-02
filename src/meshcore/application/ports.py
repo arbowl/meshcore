@@ -15,6 +15,7 @@ class CommandResult:
     success: bool
     message: str
     error: Optional[str] = None
+    packet_id: Optional[int] = None
 
 
 class EventSource(Protocol):

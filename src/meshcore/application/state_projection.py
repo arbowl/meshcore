@@ -13,6 +13,18 @@ class StateProjection:
         self._state_store = state_store
 
     async def project(self, event: MeshEvent) -> None:
+        # ACK events update sent_message tracking, not node state.
+        if event.event_type == "ack":
+            request_id = event.payload.get("request_id")
+            if request_id and hasattr(self._state_store, "mark_acked"):
+                await self._state_store.mark_acked(
+                    packet_id=request_id,
+                    acking_node=event.node_id.value,
+                    error_reason=event.payload.get("error_reason", "NONE"),
+                    ack_at=event.timestamp,
+                )
+            return
+
         existing = await self._state_store.get_node(event.node_id)
         if existing:
             state = self._update_state(existing, event)

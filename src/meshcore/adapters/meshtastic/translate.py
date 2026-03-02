@@ -15,6 +15,7 @@ _event_type_from_port["TEXT_MESSAGE_APP"] = "text"
 _event_type_from_port["TELEMETRY_APP"] = "telemetry"
 _event_type_from_port["POSITION_APP"] = "position"
 _event_type_from_port["NODEINFO_APP"] = "node_info"
+_event_type_from_port["ROUTING_APP"] = "ack"
 
 
 def translate_node_update(node: dict) -> Optional[MeshEvent]:
@@ -122,6 +123,8 @@ def _decode_payload(portnum: str, decoded: dict) -> dict[str, Any]:
         return _decode_position(decoded)
     elif portnum == "NODEINFO_APP":
         return _decode_node_info(decoded)
+    elif portnum == "ROUTING_APP":
+        return _decode_routing(decoded)
     else:
         payload_bytes = decoded.get("payload", b"")
         if isinstance(payload_bytes, bytes):
@@ -189,6 +192,22 @@ def _decode_position(decoded: dict) -> dict[str, Any]:
         if "satsInView" in pos_data:
             position["satellites"] = pos_data["satsInView"]
     return position if position else {"raw": str(decoded)}
+
+
+def _decode_routing(decoded: dict) -> dict[str, Any]:
+    """Decode a ROUTING_APP (ACK) packet.
+
+    Returns empty dict if this is not an ACK for a sent message (no
+    request_id), which causes translate_packet to discard it.
+    """
+    # request_id links this ACK back to the original sent packet.
+    # The meshtastic library serialises proto snake_case fields to camelCase.
+    request_id = decoded.get("requestId") or decoded.get("request_id")
+    if not request_id:
+        return {}
+    routing = decoded.get("routing", {})
+    error = routing.get("errorReason", "NONE")
+    return {"request_id": request_id, "error_reason": error}
 
 
 def _decode_node_info(decoded: dict) -> dict[str, Any]:

@@ -1,0 +1,10 @@
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pyc
+__pycache__/
+.claude/
+.mypy_cache/
+.venv/
+meshtastic_hexagonal.egg-info/

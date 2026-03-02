@@ -51,8 +51,18 @@
             </form>
         </div>
 
-        <!-- Messages List -->
-        <div class="messages-container">
+        <!-- Tab bar -->
+        <div class="tab-bar">
+            <button class="tab-btn tab-btn-active"
+                    onclick="switchTab(this, 'tab-received')"
+                    id="btn-received">Received</button>
+            <button class="tab-btn"
+                    onclick="switchTab(this, 'tab-sent')"
+                    id="btn-sent">Sent</button>
+        </div>
+
+        <!-- Received Messages -->
+        <div id="tab-received" class="tab-panel messages-container">
             <div id="messages-list"
                  hx-get="/messages/list{% if node_id %}?node_id={{ node_id }}{% endif %}"
                  hx-trigger="load, every 5s"
@@ -60,7 +70,29 @@
                 <p class="loading">Loading messages...</p>
             </div>
         </div>
+
+        <!-- Sent Messages -->
+        <div id="tab-sent" class="tab-panel messages-container" style="display:none">
+            <div id="sent-messages-list"
+                 hx-get="/messages/sent"
+                 hx-trigger="load, every 5s"
+                 hx-swap="innerHTML">
+                <p class="loading">Loading sent messages...</p>
+            </div>
+        </div>
     </div>
+
+    <script>
+        function switchTab(btn, panelId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-btn-active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+            btn.classList.add('tab-btn-active');
+            document.getElementById(panelId).style.display = '';
+            // Immediately refresh whichever HTMX element is in this tab.
+            const htmxEl = document.querySelector('#' + panelId + ' [hx-get]');
+            if (htmxEl) htmx.trigger(htmxEl, 'load');
+        }
+    </script>
 </body>
 </html>
 

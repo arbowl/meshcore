@@ -424,6 +424,57 @@ body {
     color: white;
 }
 
+.badge-pending {
+    background: #b8860b;
+    color: white;
+}
+
+.badge-acked {
+    background: var(--success);
+    color: white;
+}
+
+.badge-error {
+    background: var(--danger);
+    color: white;
+    cursor: help;
+}
+
+/* Sent message card — gold left border to distinguish from received */
+.message-card-sent {
+    border-left-color: var(--gold);
+}
+
+/* Tab bar for messages page */
+.tab-bar {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--gray-200);
+}
+
+.tab-btn {
+    padding: 0.5rem 1.25rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--gray-700);
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-btn:hover {
+    color: var(--navy);
+}
+
+.tab-btn-active {
+    color: var(--navy);
+    border-bottom-color: var(--gold);
+}
+
 /* Filter Bar */
 .filter-bar {
     background: var(--off-white);

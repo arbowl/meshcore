@@ -35,22 +35,34 @@ class MeshtasticCommander(MeshCommandPort):
         """Send text message to the mesh"""
         try:
             self._ensure_connected()
-
-            # Default to broadcast if no destination
-            dest_id = destination if destination else "^all"
-
-            # Send message in thread to avoid blocking
-            await asyncio.to_thread(
+            # Node IDs are stored as decimal strings; the meshtastic library
+            # treats strings of 8+ chars as hex, so convert to int first.
+            if destination:
+                try:
+                    dest_id = int(destination)
+                except ValueError:
+                    dest_id = destination  # already "^all" or "!hexid"
+            else:
+                dest_id = "^all"
+            want_ack = destination is not None
+            sent_packet = await asyncio.to_thread(
                 self._interface.sendText,
                 text,
                 destinationId=dest_id,
                 channelIndex=channel,
+                wantAck=want_ack,
             )
-
+            if isinstance(sent_packet, dict):
+                pid = sent_packet.get("id")
+            elif hasattr(sent_packet, "id"):
+                pid = sent_packet.id
+            else:
+                pid = None
             logger.info(f"Sent message to {dest_id}: {text[:50]}...")
             return CommandResult(
                 success=True,
                 message=f"Message sent to {dest_id}",
+                packet_id=int(pid) if pid else None,
             )
 
         except Exception as e:
@@ -107,9 +119,13 @@ class MeshtasticCommander(MeshCommandPort):
 class MeshtasticTcpCommander(MeshCommandPort):
     """Send commands through Meshtastic TCP interface"""
 
-    def __init__(self, host: str) -> None:
+    def __init__(
+        self,
+        host: str,
+        interface: Optional[meshtastic.tcp_interface.TCPInterface] = None,
+    ) -> None:
         self._host = host
-        self._interface: Optional[meshtastic.tcp_interface.TCPInterface] = None
+        self._interface = interface  # may be pre-created and shared with source
 
     def _ensure_connected(self) -> None:
         if self._interface is None:
@@ -126,15 +142,39 @@ class MeshtasticTcpCommander(MeshCommandPort):
         """Send text message to the mesh via TCP"""
         try:
             self._ensure_connected()
-            dest_id = destination if destination else "^all"
-            await asyncio.to_thread(
+            # Node IDs are stored as decimal strings; the meshtastic library
+            # treats strings of 8+ chars as hex, so convert to int first.
+            if destination:
+                try:
+                    dest_id = int(destination)
+                except ValueError:
+                    dest_id = destination  # already "^all" or "!hexid"
+            else:
+                dest_id = "^all"
+            # Request explicit ACK for direct (non-broadcast) messages so the
+            # destination node sends back a ROUTING_APP acknowledgement.
+            want_ack = destination is not None
+            packet_id = await asyncio.to_thread(
                 self._interface.sendText,
                 text,
                 destinationId=dest_id,
                 channelIndex=channel,
+                wantAck=want_ack,
             )
+            # sendText returns the MeshPacket protobuf object; extract the id.
+            # Guard against dict returns in case of future library changes.
+            if isinstance(packet_id, dict):
+                pid = packet_id.get("id")
+            elif hasattr(packet_id, "id"):
+                pid = packet_id.id  # protobuf MeshPacket.id field
+            else:
+                pid = None
             logger.info(f"Sent message to {dest_id}: {text[:50]}")
-            return CommandResult(success=True, message=f"Message sent to {dest_id}")
+            return CommandResult(
+                success=True,
+                message=f"Message sent to {dest_id}",
+                packet_id=int(pid) if pid else None,
+            )
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
             return CommandResult(success=False, message="Failed to send message", error=str(e))

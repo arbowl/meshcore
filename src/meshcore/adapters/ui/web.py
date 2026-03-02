@@ -173,6 +173,7 @@ def create_app(
     def send_message():
         """Send a message through Meshtastic"""
         commander = app.config['COMMANDER']
+        state_store = app.config['STATE_STORE']
 
         text = request.form.get('message', '')
         destination = request.form.get('recipient')
@@ -191,12 +192,53 @@ def create_app(
 
         result = asyncio.run(commander.send_text(text, destination, channel))
 
+        # Persist sent message so ACK status can be tracked.
+        if result.success:
+            try:
+                asyncio.run(state_store.store_sent_message(
+                    packet_id=result.packet_id,
+                    text=text,
+                    destination=destination or "broadcast",
+                    channel=channel,
+                    sent_at=datetime.now(timezone.utc),
+                ))
+            except Exception as store_err:
+                logger.error(
+                    f"Failed to store sent message: {store_err}", exc_info=True
+                )
+
         return render_template(
             "send_result.html",
             success=result.success,
             message=result.message,
             error=result.error
         )
+
+    @app.route("/messages/sent")
+    def sent_messages_page():
+        """Sent messages with ACK status (HTMX partial)"""
+        state_store = app.config['STATE_STORE']
+        messages = asyncio.run(state_store.get_sent_messages(limit=100))
+        return render_template("sent_messages.html", messages=messages)
+
+    @app.route("/api/messages/sent")
+    def api_sent_messages():
+        """JSON API for sent messages"""
+        state_store = app.config['STATE_STORE']
+        messages = asyncio.run(state_store.get_sent_messages(limit=100))
+        return jsonify([
+            {
+                "packet_id": m["packet_id"],
+                "text": m["text"],
+                "destination": m["destination"],
+                "channel": m["channel"],
+                "sent_at": m["sent_at"].isoformat(),
+                "ack_at": m["ack_at"].isoformat() if m["ack_at"] else None,
+                "ack_from": m["ack_from"],
+                "error_reason": m["error_reason"],
+            }
+            for m in messages
+        ])
 
     # ==================== Telemetry Routes ====================
 

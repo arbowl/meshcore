@@ -1,0 +1,38 @@
+{% if messages %}
+<div class="messages-list">
+    {% for msg in messages %}
+    <div class="message-card message-card-sent">
+        <div class="message-header">
+            <span class="message-from">
+                <strong>To:</strong>
+                {% if msg.destination == 'broadcast' %}
+                <span class="badge badge-broadcast">Broadcast</span>
+                {% else %}
+                <a href="/node/{{ msg.destination }}" class="node-link">{{ msg.destination }}</a>
+                {% endif %}
+            </span>
+            <span class="message-time">{{ msg.sent_at|timeago }}</span>
+        </div>
+        <div class="message-body">{{ msg.text }}</div>
+        <div class="message-meta">
+            <span class="badge">Channel {{ msg.channel }}</span>
+            {% if msg.ack_at is none %}
+                <span class="badge badge-pending">⏳ Pending</span>
+            {% elif msg.error_reason and msg.error_reason != 'NONE' %}
+                <span class="badge badge-error" title="{{ msg.error_reason }}">✗ Failed: {{ msg.error_reason }}</span>
+            {% else %}
+                <span class="badge badge-acked" title="ACK from {{ msg.ack_from }} at {{ msg.ack_at|format_datetime }}">✓ Delivered</span>
+                {% if msg.ack_from %}
+                <span class="badge">via {{ msg.ack_from }}</span>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No sent messages yet</p>
+    <p class="empty-hint">Messages sent from this interface will appear here with their delivery status</p>
+</div>
+{% endif %}

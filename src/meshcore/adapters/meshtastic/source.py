@@ -26,9 +26,23 @@ class MeshtasticSource(EventSource):
         self._queue: asyncio.Queue = asyncio.Queue()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # The meshtastic library publishes to handler-specific sub-topics
+    # (e.g. "meshtastic.receive.text") for all known port types.
+    # The generic "meshtastic.receive" topic is only used as a fallback
+    # for UNKNOWN_APP packets, so we must subscribe to each sub-topic.
+    _PACKET_TOPICS = (
+        "meshtastic.receive",           # UNKNOWN_APP fallback
+        "meshtastic.receive.text",      # TEXT_MESSAGE_APP
+        "meshtastic.receive.position",  # POSITION_APP
+        "meshtastic.receive.user",      # NODEINFO_APP
+        "meshtastic.receive.telemetry", # TELEMETRY_APP
+        "meshtastic.receive.routing",   # ROUTING_APP (ACK)
+    )
+
     async def _connect(self) -> None:
         self._loop = asyncio.get_running_loop()
-        pub.subscribe(self._on_receive, "meshtastic.receive")
+        for topic in self._PACKET_TOPICS:
+            pub.subscribe(self._on_receive, topic)
         pub.subscribe(self._on_node_updated, "meshtastic.node.updated")
         self._interface = meshtastic.serial_interface.SerialInterface(
             devPath=self._device
